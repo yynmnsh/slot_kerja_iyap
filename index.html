@@ -244,7 +244,7 @@
             const handleSubmit = (e) => {
                 e.preventDefault();
                 /* PATCH: name ikut divalidasi dan dikirim */
-                if (!name || !bankName || !accNumber) {
+                if (!name) {
                     showToastError(showNotify, t.common.requiredField);
                     return;
                 }
