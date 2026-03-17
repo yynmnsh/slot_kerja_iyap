@@ -270,6 +270,78 @@
         const clearSession = () => localStorage.removeItem(SK);
         const gid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36);
 
+        /* ─── Timezone Conversion ─── */
+        // DB stores times in WIB. These helpers convert to/from display timezone.
+        const getEpochFromWIB = (dateStr, timeStr) => {
+            if (!dateStr || !timeStr) return 0;
+            const [y,m,d] = dateStr.split('-').map(Number);
+            const [hr,min] = timeStr.split(':').map(Number);
+            return Date.UTC(y, m-1, d, hr - TZ_CONFIG.WIB.offsetUTC, min, 0);
+        };
+
+        const toDbTime = (timeStr, dateStr, fromTz) => {
+            if (!timeStr || !dateStr) return { date: dateStr, time: timeStr };
+            if (fromTz === 'WIB') return { date: dateStr, time: timeStr };
+            const diffH = TZ_CONFIG.WIB.offsetUTC - TZ_CONFIG[fromTz].offsetUTC;
+            const d = new Date(`${dateStr}T${timeStr}:00Z`);
+            d.setUTCHours(d.getUTCHours() + diffH);
+            return { date: `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`, time: `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}` };
+        };
+
+        const toDisplayTime = (timeStr, dateStr, toTz) => {
+            if (!timeStr || !dateStr) return { date: dateStr, time: timeStr };
+            if (toTz === 'WIB') return { date: dateStr, time: timeStr };
+            const epoch = getEpochFromWIB(dateStr, timeStr);
+            const d = new Date(epoch + TZ_CONFIG[toTz].offsetUTC * 3600000);
+            return { date: `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`, time: `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}` };
+        };
+
+        const formatDateId = (dateStr) => {
+            if (!dateStr) return '';
+            const [y,m,d] = dateStr.split('-').map(Number);
+            const dt = new Date(y, m-1, d);
+            return dt.toLocaleDateString('id-ID', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+        };
+
+        const formatDateShort = (dateStr) => {
+            if (!dateStr) return '';
+            const [y,m,d] = dateStr.split('-').map(Number);
+            const dt = new Date(y, m-1, d);
+            return dt.toLocaleDateString('id-ID', { weekday:'short', day:'numeric', month:'short' });
+        };
+
+        const getDayName = (dateStr) => {
+            if (!dateStr) return '';
+            const [y,m,d] = dateStr.split('-').map(Number);
+            return new Date(y,m-1,d).toLocaleDateString('id-ID',{weekday:'long'});
+        };
+
+        const addDays = (dateStr, n) => {
+            const [y,m,d] = dateStr.split('-').map(Number);
+            const dt = new Date(y, m-1, d);
+            dt.setDate(dt.getDate() + n);
+            return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        };
+
+        const getToday = () => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        };
+
+        const calcDurationMins = (start, end) => {
+            if (!start || !end) return 0;
+            const [sh,sm] = start.split(':').map(Number);
+            const [eh,em] = end.split(':').map(Number);
+            let diff = (eh*60+em) - (sh*60+sm);
+            if (diff < 0) diff += 24*60;
+            return diff;
+        };
+
+        const fmtDuration = (mins) => {
+            const h = Math.floor(mins/60); const m = mins%60;
+            return h > 0 ? (m > 0 ? `${h}j ${m}m` : `${h}j`) : `${m}m`;
+        };
+
         /* ═══════════════════════════════════════════════
            NOTIFICATION
            ═══════════════════════════════════════════════ */
@@ -924,6 +996,317 @@
         };
 
         /* ═══════════════════════════════════════════════
+           SCHEDULE VIEW
+           ═══════════════════════════════════════════════ */
+        const ScheduleView = ({ schedules, users, session, tenant, td, tz, theme, hasPerm, notify }) => {
+            const [selDate, setSelDate] = useState(getToday());
+            const [showForm, setShowForm] = useState(false);
+            const [editId, setEditId] = useState(null);
+            const [form, setForm] = useState({ date:'', startTime:'', endTime:'', notes:'' });
+            const [busy, setBusy] = useState(false);
+            const [cfm, setCfm] = useState({ show:false });
+            const [viewMode, setViewMode] = useState('day'); // day | week
+
+            const canCreate = hasPerm('schedule.create');
+            const canViewAll = hasPerm('schedule.view_all');
+            const canEditAll = hasPerm('schedule.edit_all');
+            const canDeleteAll = hasPerm('schedule.delete_all');
+            const canEditOwn = hasPerm('schedule.edit_own');
+            const canDeleteOwn = hasPerm('schedule.delete_own');
+
+            const canEdit = (s) => canEditAll || (canEditOwn && s.userId === session.id);
+            const canDelete = (s) => canDeleteAll || (canDeleteOwn && s.userId === session.id);
+
+            // Filter schedules: convert DB (WIB) dates to display timezone dates for matching
+            const getDisplaySchedules = () => {
+                const relevant = canViewAll ? schedules : schedules.filter(s => s.userId === session.id);
+                return relevant.map(s => {
+                    const ds = toDisplayTime(s.startTime, s.date, tz);
+                    const de = toDisplayTime(s.endTime, s.date, tz);
+                    return { ...s, dispDate: ds.date, dispStart: ds.time, dispEnd: de.time };
+                });
+            };
+
+            const displaySchedules = getDisplaySchedules();
+
+            // Day view
+            const daySchedules = displaySchedules.filter(s => s.dispDate === selDate).sort((a,b) => a.dispStart.localeCompare(b.dispStart));
+
+            // Week view - get 7 days starting from selected Monday
+            const getWeekStart = (d) => {
+                const [y,m,dd] = d.split('-').map(Number);
+                const dt = new Date(y,m-1,dd);
+                const dow = dt.getDay(); // 0=Sun
+                const mondayOffset = dow === 0 ? -6 : 1 - dow;
+                return addDays(d, mondayOffset);
+            };
+            const weekStart = getWeekStart(selDate);
+            const weekDays = Array.from({length:7},(_,i)=>addDays(weekStart,i));
+
+            const getUserInfo = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
+
+            // Form open
+            const openCreate = () => {
+                setEditId(null);
+                setForm({ date: selDate, startTime: '09:00', endTime: '17:00', notes: '' });
+                setShowForm(true);
+            };
+
+            const openEdit = (s) => {
+                setEditId(s.id);
+                const ds = toDisplayTime(s.startTime, s.date, tz);
+                const de = toDisplayTime(s.endTime, s.date, tz);
+                setForm({ date: ds.date, startTime: ds.time, endTime: de.time, notes: s.notes || '' });
+                setShowForm(true);
+            };
+
+            // Save
+            const saveSchedule = async () => {
+                if (!form.date || !form.startTime || !form.endTime) { notify('Tanggal dan waktu wajib diisi','error'); return; }
+                if (form.startTime >= form.endTime) { notify('Waktu selesai harus setelah waktu mulai','error'); return; }
+                setBusy(true);
+                try {
+                    // Convert from display tz to WIB for storage
+                    const dbStart = toDbTime(form.startTime, form.date, tz);
+                    const dbEnd = toDbTime(form.endTime, form.date, tz);
+                    const data = {
+                        userId: editId ? (schedules.find(s=>s.id===editId)?.userId || session.id) : session.id,
+                        date: dbStart.date,
+                        startTime: dbStart.time,
+                        endTime: dbEnd.time,
+                        notes: form.notes.trim(),
+                        updatedAt: new Date().toISOString(),
+                    };
+                    const colPath = `tenants/${tenant.id}/schedules`;
+                    if (editId) {
+                        await window.fs.updateDoc(window.fs.doc(window.db, colPath, editId), data);
+                        notify('Jadwal diperbarui','success');
+                    } else {
+                        data.createdAt = new Date().toISOString();
+                        await window.fs.addDoc(window.fs.collection(window.db, colPath), data);
+                        notify('Jadwal ditambahkan','success');
+                    }
+                    setShowForm(false); setEditId(null);
+                } catch(e) { notify('Gagal menyimpan: '+e.message,'error'); }
+                setBusy(false);
+            };
+
+            // Delete
+            const deleteSchedule = async (id) => {
+                try {
+                    await window.fs.deleteDoc(window.fs.doc(window.db, `tenants/${tenant.id}/schedules`, id));
+                    notify('Jadwal dihapus','success');
+                } catch(e) { notify('Gagal menghapus: '+e.message,'error'); }
+            };
+
+            // Navigation
+            const navDate = (n) => setSelDate(viewMode === 'week' ? addDays(selDate, n*7) : addDays(selDate, n));
+            const goToday = () => setSelDate(getToday());
+            const isToday = selDate === getToday();
+
+            // Schedule card
+            const SchCard = ({ s }) => {
+                const u = getUserInfo(s.userId);
+                const dur = calcDurationMins(s.dispStart, s.dispEnd);
+                const isMine = s.userId === session.id;
+                return (
+                    <div className={`glass-strong rounded-2xl border p-4 card-lift transition-all ${isMine ? 'border-l-4' : 'border-white/50'}`} style={isMine ? {borderLeftColor: theme.primary} : {}}>
+                        <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{background:u.color||'#94a3b8'}}>
+                                    {(u.displayName||'?')[0].toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-bold text-sm text-slate-800 truncate">{u.displayName}</span>
+                                        {isMine && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{background:theme.primary50, color:theme.primary}}>Saya</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-sm font-mono font-bold" style={{color:theme.primary}}>{s.dispStart}</span>
+                                        <span className="text-slate-300">→</span>
+                                        <span className="text-sm font-mono font-bold text-slate-600">{s.dispEnd}</span>
+                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{fmtDuration(dur)}</span>
+                                    </div>
+                                    {s.notes && <p className="text-xs text-slate-400 mt-1 truncate">{s.notes}</p>}
+                                </div>
+                            </div>
+                            {(canEdit(s) || canDelete(s)) && (
+                                <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+                                    {canEdit(s) && <button onClick={()=>openEdit(s)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-pen text-[10px]"></i></button>}
+                                    {canDelete(s) && <button onClick={()=>setCfm({show:true,title:'Hapus Jadwal?',msg:'Jadwal ini akan dihapus permanen.',danger:true,onOk:()=>{deleteSchedule(s.id);setCfm({show:false})}})} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all"><i className="fas fa-trash-alt text-[10px]"></i></button>}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="space-y-4 animate-fade-in">
+                    {/* Header bar */}
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-bold text-slate-800"><i className="fas fa-calendar-alt mr-2" style={{color:theme.primary}}></i>Jadwal</h2>
+                        <div className="flex items-center gap-2">
+                            {/* View mode toggle */}
+                            <div className="flex gap-0.5 p-0.5 rounded-lg bg-slate-100/80">
+                                {[{id:'day',l:'Hari'},{id:'week',l:'Minggu'}].map(m=>(
+                                    <button key={m.id} onClick={()=>setViewMode(m.id)} className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${viewMode===m.id?'bg-white shadow-sm text-slate-800':'text-slate-400 hover:text-slate-600'}`}>{m.l}</button>
+                                ))}
+                            </div>
+                            {canCreate && (
+                                <button onClick={openCreate} className="btn-primary px-3.5 py-2 rounded-xl text-xs font-bold">
+                                    <i className="fas fa-plus mr-1.5"></i>Tambah
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Date navigator */}
+                    <div className="glass-strong rounded-2xl border border-white/50 p-3 flex items-center justify-between">
+                        <button onClick={()=>navDate(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-chevron-left text-sm"></i></button>
+                        <div className="text-center flex-1">
+                            {viewMode === 'day' ? (
+                                <>
+                                    <p className="text-sm font-bold text-slate-800">{formatDateId(selDate)}</p>
+                                    <p className="text-[10px] text-slate-400 font-medium">{daySchedules.length} jadwal · {TZ_CONFIG[tz]?.short||tz}</p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-sm font-bold text-slate-800">{formatDateShort(weekStart)} — {formatDateShort(addDays(weekStart,6))}</p>
+                                    <p className="text-[10px] text-slate-400 font-medium">{displaySchedules.filter(s=>weekDays.includes(s.dispDate)).length} jadwal minggu ini</p>
+                                </>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            {!isToday && <button onClick={goToday} className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-all" style={{color:theme.primary}}>Hari Ini</button>}
+                            <button onClick={()=>navDate(1)} className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-chevron-right text-sm"></i></button>
+                        </div>
+                    </div>
+
+                    {/* Day View */}
+                    {viewMode === 'day' && (
+                        <>
+                            {daySchedules.length === 0 ? (
+                                <div className="glass-strong rounded-2xl border border-white/50 p-10 text-center">
+                                    <div className="text-4xl mb-3">📭</div>
+                                    <p className="text-sm font-semibold text-slate-500">Tidak ada jadwal</p>
+                                    <p className="text-xs text-slate-400 mt-1">{formatDateShort(selDate)}</p>
+                                    {canCreate && <button onClick={openCreate} className="mt-4 text-xs font-bold px-4 py-2 rounded-xl transition-all hover:shadow" style={{color:theme.primary, background:theme.primary50}}>
+                                        <i className="fas fa-plus mr-1.5"></i>Buat Jadwal
+                                    </button>}
+                                </div>
+                            ) : (
+                                <div className="space-y-2.5 stagger">
+                                    {daySchedules.map(s => <SchCard key={s.id} s={s} />)}
+                                </div>
+                            )}
+                            {/* Daily summary */}
+                            {daySchedules.length > 0 && (
+                                <div className="glass-strong rounded-2xl border border-white/50 p-4">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold text-slate-500">Total jam terjadwal</span>
+                                        <span className="text-sm font-bold" style={{color:theme.primary}}>
+                                            {fmtDuration(daySchedules.reduce((acc,s) => acc + calcDurationMins(s.dispStart, s.dispEnd), 0))}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1">
+                                        <span className="text-xs font-semibold text-slate-500">Jumlah orang</span>
+                                        <span className="text-sm font-bold text-slate-700">{new Set(daySchedules.map(s=>s.userId)).size}</span>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {/* Week View */}
+                    {viewMode === 'week' && (
+                        <div className="space-y-2">
+                            {weekDays.map(day => {
+                                const daySch = displaySchedules.filter(s=>s.dispDate===day).sort((a,b)=>a.dispStart.localeCompare(b.dispStart));
+                                const isT = day === getToday();
+                                return (
+                                    <div key={day} className={`glass-strong rounded-2xl border overflow-hidden transition-all ${isT ? 'border-2' : 'border-white/50'}`} style={isT ? {borderColor: theme.primary+'40'} : {}}>
+                                        <button onClick={()=>{setSelDate(day);setViewMode('day')}} className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold ${isT ? 'text-white shadow-md' : 'bg-slate-100 text-slate-500'}`} style={isT ? {background:`linear-gradient(135deg, ${theme.primary}, ${theme.primaryDark})`} : {}}>
+                                                    {day.split('-')[2]}
+                                                </div>
+                                                <div className="text-left">
+                                                    <p className={`text-xs font-bold ${isT ? '' : 'text-slate-700'}`} style={isT ? {color:theme.primary} : {}}>{getDayName(day)}</p>
+                                                    <p className="text-[10px] text-slate-400">{daySch.length} jadwal</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                {daySch.slice(0,4).map(s => {
+                                                    const u = getUserInfo(s.userId);
+                                                    return <div key={s.id} className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[8px] font-bold -ml-1 first:ml-0 border-2 border-white" style={{background:u.color||'#94a3b8'}}>{(u.displayName||'?')[0]}</div>;
+                                                })}
+                                                {daySch.length > 4 && <span className="text-[10px] font-bold text-slate-400 ml-1">+{daySch.length-4}</span>}
+                                                <i className="fas fa-chevron-right text-slate-300 text-[10px] ml-2"></i>
+                                            </div>
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Schedule Form Modal */}
+                    <Modal show={showForm} onClose={()=>{setShowForm(false);setEditId(null)}} title={editId ? 'Edit Jadwal' : 'Jadwal Baru'}>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Tanggal</label>
+                                <input type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Mulai <span className="text-slate-300">({TZ_CONFIG[tz]?.short})</span></label>
+                                    <input type="time" value={form.startTime} onChange={e=>setForm({...form, startTime:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium font-mono" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Selesai <span className="text-slate-300">({TZ_CONFIG[tz]?.short})</span></label>
+                                    <input type="time" value={form.endTime} onChange={e=>setForm({...form, endTime:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium font-mono" />
+                                </div>
+                            </div>
+                            {form.startTime && form.endTime && form.startTime < form.endTime && (
+                                <div className="text-center">
+                                    <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:theme.primary50, color:theme.primary}}>
+                                        <i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(calcDurationMins(form.startTime, form.endTime))}
+                                    </span>
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Catatan <span className="text-slate-300">(opsional)</span></label>
+                                <textarea value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})} rows={2} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300 resize-none" placeholder="cth: Meeting pagi, review PR..." />
+                            </div>
+                            {/* Show converted times if not WIB */}
+                            {tz !== 'WIB' && form.date && form.startTime && form.endTime && (
+                                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                                    <p className="text-[10px] font-bold text-slate-400 mb-1">Konversi Zona Waktu</p>
+                                    {(td?.enabledTimezones||[]).filter(t=>t!==tz).map(t => {
+                                        const cs = toDbTime(form.startTime, form.date, tz);
+                                        const ce = toDbTime(form.endTime, form.date, tz);
+                                        const ds = toDisplayTime(cs.time, cs.date, t);
+                                        const de = toDisplayTime(ce.time, ce.date, t);
+                                        return <p key={t} className="text-xs text-slate-500"><span className="font-bold">{TZ_CONFIG[t]?.short}:</span> {ds.time} – {de.time} <span className="text-slate-300">({formatDateShort(ds.date)})</span></p>;
+                                    })}
+                                </div>
+                            )}
+                            <div className="flex gap-3 pt-1">
+                                <button onClick={()=>{setShowForm(false);setEditId(null)}} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all">Batal</button>
+                                <button onClick={saveSchedule} disabled={busy} className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-sm disabled:opacity-50">
+                                    {busy?<><i className="fas fa-spinner fa-spin mr-2"></i>Menyimpan...</>:<><i className={`fas ${editId?'fa-save':'fa-plus'} mr-2`}></i>{editId?'Simpan':'Tambah'}</>}
+                                </button>
+                            </div>
+                        </div>
+                    </Modal>
+
+                    <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
+                </div>
+            );
+        };
+
+        /* ═══════════════════════════════════════════════
            SCHEDULER APP (TENANT VIEW)
            ═══════════════════════════════════════════════ */
         const SchedulerApp = ({ session, tenant, onLogout, onBack, notify }) => {
@@ -1060,7 +1443,7 @@
                                 )}
                             </div>
                         )}
-                        {view==='schedule' && <Placeholder icon="fa-calendar-alt" color="var(--c-primary-50)" title="Modul Jadwal" sub="Akan tersedia di Fase 2" />}
+                        {view==='schedule' && <ScheduleView schedules={schedules} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} />}
                         {view==='timesheet' && <Placeholder icon="fa-file-invoice-dollar" color="#ecfdf5" title="Modul Timesheet" sub="Akan tersedia di Fase 3" />}
                         {view==='analytics' && <Placeholder icon="fa-chart-pie" color="#eef2ff" title="Modul Analitik" sub="Akan tersedia di Fase 3" />}
                         {view==='admin' && canAdmin && <Placeholder icon="fa-cog" color="#f5f3ff" title="Panel Admin" sub="Akan diperluas di fase berikutnya" />}
