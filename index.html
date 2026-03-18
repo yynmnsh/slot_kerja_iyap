@@ -606,13 +606,117 @@
                 </div>
             );
         };
+        const TenantForm = ({ show, onClose, editing, onSave }) => {
+            const [f, sF] = useState({ appName:'', appTagline:'', themeId:1, enabledTimezones:['WIB'], defaultTimezone:'WIB' });
+            useEffect(() => { if (show) sF(editing ? { appName:editing.appName||'', appTagline:editing.appTagline||'', themeId:editing.themeId||1, enabledTimezones:editing.enabledTimezones||['WIB'], defaultTimezone:editing.defaultTimezone||'WIB' } : { appName:'', appTagline:'', themeId:1, enabledTimezones:['WIB'], defaultTimezone:'WIB' }); }, [editing, show]);
+            const toggleTz = (tz) => sF(prev => { const tzs=prev.enabledTimezones.includes(tz)?prev.enabledTimezones.filter(t=>t!==tz):[...prev.enabledTimezones,tz]; if(!tzs.length)return prev; return{...prev,enabledTimezones:tzs,defaultTimezone:tzs.includes(prev.defaultTimezone)?prev.defaultTimezone:tzs[0]}; });
+            const th = THEMES[f.themeId]||THEMES[1];
+            return (
+                <Modal show={show} onClose={onClose} title={editing?'Edit Workspace':'Workspace Baru'} wide>
+                    <div className="space-y-5">
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Nama Aplikasi</label><input value={f.appName} onChange={e=>sF({...f,appName:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300" placeholder="cth: Slot Kerja Tim Riset" /></div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Tagline <span className="text-slate-300">(opsional)</span></label><input value={f.appTagline} onChange={e=>sF({...f,appTagline:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300" placeholder="cth: Manajemen jadwal kerja jarak jauh" /></div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-2.5">Tema Warna</label>
+                            <div className="grid grid-cols-7 gap-2">{Object.values(THEMES).map(t=><button key={t.id} onClick={()=>sF({...f,themeId:t.id})} className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all relative ${f.themeId===t.id?'border-slate-700 shadow-lg scale-[1.06]':'border-transparent hover:border-slate-200'}`}><div className="w-9 h-9 rounded-xl shadow-inner" style={{background:`linear-gradient(135deg, ${t.primary}, ${t.primaryDark})`}}></div><span className="text-[9px] font-bold text-slate-400">{t.emoji}</span>{f.themeId===t.id&&<div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-700 text-white flex items-center justify-center shadow"><i className="fas fa-check text-[8px]"></i></div>}</button>)}</div>
+                            <p className="text-[11px] text-slate-400 mt-2">Tema: <span className="font-bold" style={{color:th.primary}}>{th.name} {th.emoji}</span></p>
+                        </div>
+                        <div><label className="block text-xs font-semibold text-slate-500 mb-2.5">Zona Waktu</label>
+                            <div className="space-y-2">{Object.entries(TZ_CONFIG).map(([k,tz])=><label key={k} className={`flex items-center justify-between p-3.5 rounded-xl border-2 cursor-pointer transition-all ${f.enabledTimezones.includes(k)?'border-blue-200 bg-blue-50/40':'border-slate-100 hover:border-slate-200'}`}>
+                                <div className="flex items-center gap-3"><input type="checkbox" className="perm-check" checked={f.enabledTimezones.includes(k)} onChange={()=>toggleTz(k)} /><div><span className="text-sm font-bold text-slate-700">{tz.short}</span><span className="text-xs text-slate-400 ml-2">{tz.label}</span></div></div>
+                                {f.enabledTimezones.includes(k)&&<button onClick={e=>{e.preventDefault();sF({...f,defaultTimezone:k})}} className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all ${f.defaultTimezone===k?'bg-blue-500 text-white':'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>{f.defaultTimezone===k?'✓ Default':'Jadikan default'}</button>}
+                            </label>)}</div>
+                        </div>
+                        <div className="flex gap-3 pt-2">
+                            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all">Batal</button>
+                            <button onClick={()=>onSave(f)} disabled={!f.appName.trim()} className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"><i className={`fas ${editing?'fa-save':'fa-plus'} mr-2`}></i>{editing?'Simpan':'Buat Workspace'}</button>
+                        </div>
+                    </div>
+                </Modal>
+            );
+        };
 
         /* ═══════════════════════════════════════════════
-           TENANT FORM MODAL
+           USER FORM MODAL — used by superadmin & tenant admin
+           mode="superadmin": can pick role admin/user, pick workspace
+           mode="tenant": can pick role user/semiadmin, workspace pre-set
            ═══════════════════════════════════════════════ */
+        const UserForm = ({ show, onClose, editing, onSave, tenants, notify, mode='superadmin', fixedTenantId=null }) => {
+            const roles = mode==='superadmin' ? ['user','admin'] : ['user','semiadmin'];
+            const init = { username:'', password:'', displayName:'', role:roles[0], tenantId:fixedTenantId||'', permissions:[...PRESETS.user], color:USER_COLORS[Math.floor(Math.random()*USER_COLORS.length)], isActive:true, hourlyRate:0, currency:'IDR' };
+            const [f, sF] = useState(init);
+            const [showPw, setShowPw] = useState(false);
+
+            useEffect(() => {
+                if (!show) return;
+                if (editing) {
+                    sF({ username:editing.username||'', password:'', displayName:editing.displayName||'', role:editing.role||roles[0], tenantId:editing.tenantId||fixedTenantId||'', permissions:editing.permissions||[], color:editing.color||'#2563eb', isActive:editing.isActive!==false, hourlyRate:editing.hourlyRate||0, currency:editing.currency||'IDR' });
+                } else {
+                    sF({...init, tenantId:fixedTenantId||(tenants&&tenants[0]?.id)||'', color:USER_COLORS[Math.floor(Math.random()*USER_COLORS.length)]});
+                }
+            }, [editing, show]);
+
+            const toggleP = (p) => sF(prev=>({...prev, permissions:prev.permissions.includes(p)?prev.permissions.filter(x=>x!==p):[...prev.permissions,p]}));
+
+            const save = async () => {
+                if (!f.displayName.trim()) { notify('Nama wajib diisi','error'); return; }
+                if (!f.tenantId&&!fixedTenantId) { notify('Pilih workspace','error'); return; }
+                if (!editing && (!f.username.trim()||!f.password)) { notify('Username & password wajib diisi','error'); return; }
+                if (!editing && f.password.length<6) { notify('Password minimal 6 karakter','error'); return; }
+                const data = { displayName:f.displayName.trim(), role:f.role, tenantId:fixedTenantId||f.tenantId, permissions:f.role==='admin'?Object.keys(ALL_PERMS):f.permissions, color:f.color, isActive:f.isActive, hourlyRate:parseFloat(f.hourlyRate)||0, currency:f.currency };
+                if (!editing) { data.username=f.username.trim().toLowerCase(); data.passwordHash=await hashPw(f.password); }
+                if (editing && f.password) data.passwordHash=await hashPw(f.password);
+                onSave(data);
+            };
+
+            const showPerms = f.role !== 'admin';
+
+            return (
+                <Modal show={show} onClose={onClose} title={editing?'Edit Akun':'Buat Akun Baru'} wide>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Nama Tampilan</label><input value={f.displayName} onChange={e=>sF({...f,displayName:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300" placeholder="cth: Budi" /></div>
+                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Username</label><input value={f.username} onChange={e=>sF({...f,username:e.target.value})} disabled={!!editing} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium font-mono placeholder:text-slate-300 disabled:opacity-50" placeholder="cth: budi" autoComplete="off" /></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">{editing?'Password Baru (opsional)':'Password'}</label><div className="relative"><input type={showPw?'text':'password'} value={f.password} onChange={e=>sF({...f,password:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium pr-10 placeholder:text-slate-300" placeholder={editing?'Kosongkan jika tetap':'Min. 6 karakter'} /><button type="button" onClick={()=>setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><i className={`fas ${showPw?'fa-eye-slash':'fa-eye'} text-xs`}></i></button></div></div>
+                            {!fixedTenantId&&tenants?<div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Workspace</label><select value={f.tenantId} onChange={e=>sF({...f,tenantId:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium"><option value="">-- Pilih --</option>{tenants.map(t=><option key={t.id} value={t.id}>{t.appName}</option>)}</select></div>
+                            :<div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Peran</label><select value={f.role} onChange={e=>{const r=e.target.value;sF({...f,role:r,permissions:r==='admin'?Object.keys(ALL_PERMS):(PRESETS[r]||f.permissions)});}} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium">{roles.map(r=><option key={r} value={r}>{{user:'User',semiadmin:'Semi-Admin',admin:'Admin'}[r]}</option>)}</select></div>}
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                            {!fixedTenantId&&<div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Peran</label><select value={f.role} onChange={e=>{const r=e.target.value;sF({...f,role:r,permissions:r==='admin'?Object.keys(ALL_PERMS):(PRESETS[r]||f.permissions)});}} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium">{roles.map(r=><option key={r} value={r}>{{user:'User',semiadmin:'Semi-Admin',admin:'Admin'}[r]}</option>)}</select></div>}
+                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Warna</label><div className="flex flex-wrap gap-1.5 mt-0.5">{USER_COLORS.slice(0,8).map(c=><button key={c} onClick={()=>sF({...f,color:c})} className={`w-6 h-6 rounded-full border-2 transition-all ${f.color===c?'border-slate-700 scale-110':'border-transparent hover:scale-105'}`} style={{background:c}}></button>)}</div></div>
+                            <div className="flex items-center gap-3 pt-5"><div className={`toggle-track ${f.isActive?'active':''}`} onClick={()=>sF({...f,isActive:!f.isActive})}><div className="toggle-knob"></div></div><span className="text-xs font-semibold text-slate-600">{f.isActive?'Aktif':'Nonaktif'}</span></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Tarif/Jam</label><input type="number" value={f.hourlyRate} onChange={e=>sF({...f,hourlyRate:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium" min="0" /></div>
+                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Mata Uang</label><select value={f.currency} onChange={e=>sF({...f,currency:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium"><option value="IDR">IDR (Rupiah)</option><option value="USD">USD (Dollar)</option></select></div>
+                        </div>
+                        {showPerms && (
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="text-xs font-semibold text-slate-500">Izin Akses</label>
+                                    <div className="flex gap-1">
+                                        <button onClick={()=>sF({...f,permissions:[...PRESETS.user],role:'user'})} className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all">Preset User</button>
+                                        <button onClick={()=>sF({...f,permissions:[...PRESETS.semiadmin],role:'semiadmin'})} className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-100 transition-all">Preset Semi-Admin</button>
+                                    </div>
+                                </div>
+                                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 max-h-52 overflow-y-auto">
+                                    {Object.entries(PERM_GROUPS).map(([g,perms])=><div key={g} className="p-3"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{g}</p><div className="grid grid-cols-2 gap-1">{perms.map(p=><label key={p} className="flex items-center gap-2 cursor-pointer py-1 px-2 rounded-lg hover:bg-slate-50 transition-colors"><input type="checkbox" className="perm-check" checked={f.permissions.includes(p)} onChange={()=>toggleP(p)} /><span className="text-[11px] text-slate-600">{ALL_PERMS[p]}</span></label>)}</div></div>)}
+                                </div>
+                            </div>
+                        )}
+                        <div className="flex gap-3 pt-2">
+                            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all">Batal</button>
+                            <button onClick={save} className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-sm"><i className={`fas ${editing?'fa-save':'fa-plus'} mr-2`}></i>{editing?'Simpan':'Buat'}</button>
+                        </div>
+                    </div>
+                </Modal>
+            );
+        };
+
 
         /* ═══════════════════════════════════════════════
-           SUPERADMIN DASHBOARD — simplified: workspace CRUD + account creation only
+           SUPERADMIN DASHBOARD
            ═══════════════════════════════════════════════ */
         const SuperDash = ({ session, onLogout, notify, onEnter }) => {
             const [tab, setTab] = useState('tenants');
@@ -769,121 +873,6 @@
                 </div>
             );
         };
-
-        /* ═══════════════════════════════════════════════
-           TENANT FORM MODAL
-           ═══════════════════════════════════════════════ */
-        const TenantForm = ({ show, onClose, editing, onSave }) => {
-            const [f, sF] = useState({ appName:'', appTagline:'', themeId:1, enabledTimezones:['WIB'], defaultTimezone:'WIB' });
-            useEffect(() => { if (show) sF(editing ? { appName:editing.appName||'', appTagline:editing.appTagline||'', themeId:editing.themeId||1, enabledTimezones:editing.enabledTimezones||['WIB'], defaultTimezone:editing.defaultTimezone||'WIB' } : { appName:'', appTagline:'', themeId:1, enabledTimezones:['WIB'], defaultTimezone:'WIB' }); }, [editing, show]);
-            const toggleTz = (tz) => sF(prev => { const tzs=prev.enabledTimezones.includes(tz)?prev.enabledTimezones.filter(t=>t!==tz):[...prev.enabledTimezones,tz]; if(!tzs.length)return prev; return{...prev,enabledTimezones:tzs,defaultTimezone:tzs.includes(prev.defaultTimezone)?prev.defaultTimezone:tzs[0]}; });
-            const th = THEMES[f.themeId]||THEMES[1];
-            return (
-                <Modal show={show} onClose={onClose} title={editing?'Edit Workspace':'Workspace Baru'} wide>
-                    <div className="space-y-5">
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Nama Aplikasi</label><input value={f.appName} onChange={e=>sF({...f,appName:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300" placeholder="cth: Slot Kerja Tim Riset" /></div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Tagline <span className="text-slate-300">(opsional)</span></label><input value={f.appTagline} onChange={e=>sF({...f,appTagline:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300" placeholder="cth: Manajemen jadwal kerja jarak jauh" /></div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-2.5">Tema Warna</label>
-                            <div className="grid grid-cols-7 gap-2">{Object.values(THEMES).map(t=><button key={t.id} onClick={()=>sF({...f,themeId:t.id})} className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all relative ${f.themeId===t.id?'border-slate-700 shadow-lg scale-[1.06]':'border-transparent hover:border-slate-200'}`}><div className="w-9 h-9 rounded-xl shadow-inner" style={{background:`linear-gradient(135deg, ${t.primary}, ${t.primaryDark})`}}></div><span className="text-[9px] font-bold text-slate-400">{t.emoji}</span>{f.themeId===t.id&&<div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-700 text-white flex items-center justify-center shadow"><i className="fas fa-check text-[8px]"></i></div>}</button>)}</div>
-                            <p className="text-[11px] text-slate-400 mt-2">Tema: <span className="font-bold" style={{color:th.primary}}>{th.name} {th.emoji}</span></p>
-                        </div>
-                        <div><label className="block text-xs font-semibold text-slate-500 mb-2.5">Zona Waktu</label>
-                            <div className="space-y-2">{Object.entries(TZ_CONFIG).map(([k,tz])=><label key={k} className={`flex items-center justify-between p-3.5 rounded-xl border-2 cursor-pointer transition-all ${f.enabledTimezones.includes(k)?'border-blue-200 bg-blue-50/40':'border-slate-100 hover:border-slate-200'}`}>
-                                <div className="flex items-center gap-3"><input type="checkbox" className="perm-check" checked={f.enabledTimezones.includes(k)} onChange={()=>toggleTz(k)} /><div><span className="text-sm font-bold text-slate-700">{tz.short}</span><span className="text-xs text-slate-400 ml-2">{tz.label}</span></div></div>
-                                {f.enabledTimezones.includes(k)&&<button onClick={e=>{e.preventDefault();sF({...f,defaultTimezone:k})}} className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all ${f.defaultTimezone===k?'bg-blue-500 text-white':'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>{f.defaultTimezone===k?'✓ Default':'Jadikan default'}</button>}
-                            </label>)}</div>
-                        </div>
-                        <div className="flex gap-3 pt-2">
-                            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all">Batal</button>
-                            <button onClick={()=>onSave(f)} disabled={!f.appName.trim()} className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"><i className={`fas ${editing?'fa-save':'fa-plus'} mr-2`}></i>{editing?'Simpan':'Buat Workspace'}</button>
-                        </div>
-                    </div>
-                </Modal>
-            );
-        };
-
-        /* ═══════════════════════════════════════════════
-           USER FORM MODAL — used by superadmin & tenant admin
-           mode="superadmin": can pick role admin/user, pick workspace
-           mode="tenant": can pick role user/semiadmin, workspace pre-set
-           ═══════════════════════════════════════════════ */
-        const UserForm = ({ show, onClose, editing, onSave, tenants, notify, mode='superadmin', fixedTenantId=null }) => {
-            const roles = mode==='superadmin' ? ['user','admin'] : ['user','semiadmin'];
-            const init = { username:'', password:'', displayName:'', role:roles[0], tenantId:fixedTenantId||'', permissions:[...PRESETS.user], color:USER_COLORS[Math.floor(Math.random()*USER_COLORS.length)], isActive:true, hourlyRate:0, currency:'IDR' };
-            const [f, sF] = useState(init);
-            const [showPw, setShowPw] = useState(false);
-
-            useEffect(() => {
-                if (!show) return;
-                if (editing) {
-                    sF({ username:editing.username||'', password:'', displayName:editing.displayName||'', role:editing.role||roles[0], tenantId:editing.tenantId||fixedTenantId||'', permissions:editing.permissions||[], color:editing.color||'#2563eb', isActive:editing.isActive!==false, hourlyRate:editing.hourlyRate||0, currency:editing.currency||'IDR' });
-                } else {
-                    sF({...init, tenantId:fixedTenantId||(tenants&&tenants[0]?.id)||'', color:USER_COLORS[Math.floor(Math.random()*USER_COLORS.length)]});
-                }
-            }, [editing, show]);
-
-            const toggleP = (p) => sF(prev=>({...prev, permissions:prev.permissions.includes(p)?prev.permissions.filter(x=>x!==p):[...prev.permissions,p]}));
-
-            const save = async () => {
-                if (!f.displayName.trim()) { notify('Nama wajib diisi','error'); return; }
-                if (!f.tenantId&&!fixedTenantId) { notify('Pilih workspace','error'); return; }
-                if (!editing && (!f.username.trim()||!f.password)) { notify('Username & password wajib diisi','error'); return; }
-                if (!editing && f.password.length<6) { notify('Password minimal 6 karakter','error'); return; }
-                const data = { displayName:f.displayName.trim(), role:f.role, tenantId:fixedTenantId||f.tenantId, permissions:f.role==='admin'?Object.keys(ALL_PERMS):f.permissions, color:f.color, isActive:f.isActive, hourlyRate:parseFloat(f.hourlyRate)||0, currency:f.currency };
-                if (!editing) { data.username=f.username.trim().toLowerCase(); data.passwordHash=await hashPw(f.password); }
-                if (editing && f.password) data.passwordHash=await hashPw(f.password);
-                onSave(data);
-            };
-
-            const showPerms = f.role !== 'admin';
-
-            return (
-                <Modal show={show} onClose={onClose} title={editing?'Edit Akun':'Buat Akun Baru'} wide>
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Nama Tampilan</label><input value={f.displayName} onChange={e=>sF({...f,displayName:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300" placeholder="cth: Budi" /></div>
-                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Username</label><input value={f.username} onChange={e=>sF({...f,username:e.target.value})} disabled={!!editing} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium font-mono placeholder:text-slate-300 disabled:opacity-50" placeholder="cth: budi" autoComplete="off" /></div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">{editing?'Password Baru (opsional)':'Password'}</label><div className="relative"><input type={showPw?'text':'password'} value={f.password} onChange={e=>sF({...f,password:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium pr-10 placeholder:text-slate-300" placeholder={editing?'Kosongkan jika tetap':'Min. 6 karakter'} /><button type="button" onClick={()=>setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><i className={`fas ${showPw?'fa-eye-slash':'fa-eye'} text-xs`}></i></button></div></div>
-                            {!fixedTenantId&&tenants?<div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Workspace</label><select value={f.tenantId} onChange={e=>sF({...f,tenantId:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium"><option value="">-- Pilih --</option>{tenants.map(t=><option key={t.id} value={t.id}>{t.appName}</option>)}</select></div>
-                            :<div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Peran</label><select value={f.role} onChange={e=>{const r=e.target.value;sF({...f,role:r,permissions:r==='admin'?Object.keys(ALL_PERMS):(PRESETS[r]||f.permissions)});}} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium">{roles.map(r=><option key={r} value={r}>{{user:'User',semiadmin:'Semi-Admin',admin:'Admin'}[r]}</option>)}</select></div>}
-                        </div>
-                        <div className="grid grid-cols-3 gap-4">
-                            {!fixedTenantId&&<div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Peran</label><select value={f.role} onChange={e=>{const r=e.target.value;sF({...f,role:r,permissions:r==='admin'?Object.keys(ALL_PERMS):(PRESETS[r]||f.permissions)});}} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium">{roles.map(r=><option key={r} value={r}>{{user:'User',semiadmin:'Semi-Admin',admin:'Admin'}[r]}</option>)}</select></div>}
-                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Warna</label><div className="flex flex-wrap gap-1.5 mt-0.5">{USER_COLORS.slice(0,8).map(c=><button key={c} onClick={()=>sF({...f,color:c})} className={`w-6 h-6 rounded-full border-2 transition-all ${f.color===c?'border-slate-700 scale-110':'border-transparent hover:scale-105'}`} style={{background:c}}></button>)}</div></div>
-                            <div className="flex items-center gap-3 pt-5"><div className={`toggle-track ${f.isActive?'active':''}`} onClick={()=>sF({...f,isActive:!f.isActive})}><div className="toggle-knob"></div></div><span className="text-xs font-semibold text-slate-600">{f.isActive?'Aktif':'Nonaktif'}</span></div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Tarif/Jam</label><input type="number" value={f.hourlyRate} onChange={e=>sF({...f,hourlyRate:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium" min="0" /></div>
-                            <div><label className="block text-xs font-semibold text-slate-500 mb-1.5">Mata Uang</label><select value={f.currency} onChange={e=>sF({...f,currency:e.target.value})} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium"><option value="IDR">IDR (Rupiah)</option><option value="USD">USD (Dollar)</option></select></div>
-                        </div>
-                        {showPerms && (
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <label className="text-xs font-semibold text-slate-500">Izin Akses</label>
-                                    <div className="flex gap-1">
-                                        <button onClick={()=>sF({...f,permissions:[...PRESETS.user],role:'user'})} className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-all">Preset User</button>
-                                        <button onClick={()=>sF({...f,permissions:[...PRESETS.semiadmin],role:'semiadmin'})} className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-100 transition-all">Preset Semi-Admin</button>
-                                    </div>
-                                </div>
-                                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 max-h-52 overflow-y-auto">
-                                    {Object.entries(PERM_GROUPS).map(([g,perms])=><div key={g} className="p-3"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{g}</p><div className="grid grid-cols-2 gap-1">{perms.map(p=><label key={p} className="flex items-center gap-2 cursor-pointer py-1 px-2 rounded-lg hover:bg-slate-50 transition-colors"><input type="checkbox" className="perm-check" checked={f.permissions.includes(p)} onChange={()=>toggleP(p)} /><span className="text-[11px] text-slate-600">{ALL_PERMS[p]}</span></label>)}</div></div>)}
-                                </div>
-                            </div>
-                        )}
-                        <div className="flex gap-3 pt-2">
-                            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all">Batal</button>
-                            <button onClick={save} className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-sm"><i className={`fas ${editing?'fa-save':'fa-plus'} mr-2`}></i>{editing?'Simpan':'Buat'}</button>
-                        </div>
-                    </div>
-                </Modal>
-            );
-        };
-
-            );
-        };
-
 
         /* ═══════════════════════════════════════════════
            SCHEDULE VIEW — matches v1 ScheduleManager
@@ -1877,14 +1866,32 @@
             const notify = useCallback((msg, type='info', dur=3500) => { const id=Date.now()+Math.random(); setNotifs(p=>[...p,{id,msg,type}]); setTimeout(()=>setNotifs(p=>p.filter(n=>n.id!==id)),dur); }, []);
 
             useEffect(() => {
+                const waitFb = () => new Promise(res => {
+                    const check = () => (window.db && window.fs && window.fa) ? res() : setTimeout(check, 100);
+                    check();
+                });
                 (async () => { try {
+                    await waitFb();
                     await window.fa.signInAnonymously(window.auth);
                     const cfg=await window.fs.getDoc(window.fs.doc(window.db,'system','config'));
                     if(!cfg.exists()||!cfg.data().setupComplete){setState('setup');return;}
                     const saved=loadSession();
-                    if(saved){const uSnap=await window.fs.getDoc(window.fs.doc(window.db,'users',saved.id));if(uSnap.exists()&&uSnap.data().isActive){const d=uSnap.data();const s={...saved,displayName:d.displayName,role:d.role,tenantId:d.tenantId,permissions:d.permissions||[],color:d.color||'#2563eb'};setSession(s);saveSession(s);if(s.role==='superadmin'){applyTheme(1);setState('super');return;}if(s.tenantId){const tSnap=await window.fs.getDoc(window.fs.doc(window.db,'tenants',s.tenantId));if(tSnap.exists()){setTenant({id:tSnap.id,...tSnap.data()});applyTheme(tSnap.data().themeId||1);setState('app');return;}}}clearSession();}
+                    if(saved){
+                        const uSnap=await window.fs.getDoc(window.fs.doc(window.db,'users',saved.id));
+                        if(uSnap.exists()&&uSnap.data().isActive){
+                            const d=uSnap.data();
+                            const s={...saved,displayName:d.displayName,role:d.role,tenantId:d.tenantId,permissions:d.permissions||[],color:d.color||'#2563eb'};
+                            setSession(s);saveSession(s);
+                            if(s.role==='superadmin'){applyTheme(1);setState('super');return;}
+                            if(s.tenantId){
+                                const tSnap=await window.fs.getDoc(window.fs.doc(window.db,'tenants',s.tenantId));
+                                if(tSnap.exists()){setTenant({id:tSnap.id,...tSnap.data()});applyTheme(tSnap.data().themeId||1);setState('app');return;}
+                            }
+                        }
+                        clearSession();
+                    }
                     setState('login');
-                } catch(e){console.error(e);setState('login');} })();
+                } catch(e){console.error('Boot error:',e);setState('login');} })();
             }, []);
 
             const login=(s)=>{setSession(s);saveSession(s);if(s.role==='superadmin'){applyTheme(1);setState('super');}else if(s.tenantId){window.fs.getDoc(window.fs.doc(window.db,'tenants',s.tenantId)).then(snap=>{if(snap.exists()){const t={id:snap.id,...snap.data()};setTenant(t);applyTheme(t.themeId||1);setState('app');}else notify('Workspace tidak ditemukan','error');});}};
