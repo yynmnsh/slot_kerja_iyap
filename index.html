@@ -1167,7 +1167,10 @@
                 <div className="space-y-4 stagger animate-fade-in">
                     {/* Welcome + Earnings */}
                     <div className="rounded-2xl p-5 text-white shadow-xl relative overflow-hidden" style={{background:`linear-gradient(145deg, ${theme.primaryDark} 0%, ${theme.primary} 55%, ${theme.primaryLight}90 100%)`}}>
-                        <div className="relative z-10"><h2 className="text-xl font-extrabold">Halo, {session.displayName}! 👋</h2><p className="text-white/50 text-[11px] mt-1"><i className="fas fa-clock mr-1"></i>{TZ_CONFIG[tz]?.label}</p></div>
+                        <div className="relative z-10 flex items-start justify-between">
+                            <div><h2 className="text-xl font-extrabold">Halo, {session.displayName}! 👋</h2><p className="text-white/50 text-[11px] mt-1"><i className="fas fa-clock mr-1"></i>{TZ_CONFIG[tz]?.label}</p></div>
+                            <button onClick={()=>setShowProfile(true)} className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/15 hover:bg-white/25 backdrop-blur-sm border border-white/20 text-white transition-all active:scale-90" title="Pengaturan Akun"><i className="fas fa-user-cog text-sm"></i></button>
+                        </div>
                         {totalAmt > 0 ? (
                             <div className="relative z-10 mt-4 rounded-2xl overflow-hidden" style={{background:'rgba(0,0,0,0.18)',border:'1px solid rgba(255,255,255,0.12)'}}>
                                 <div className="px-4 pt-3 pb-2">
@@ -1192,16 +1195,14 @@
                         <div className="space-y-2.5">{upcoming.map(s=>{const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);const u=getU(s.userId);return(<div key={s.id} className="flex items-center p-3 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all"><div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm" style={{backgroundColor:u.color}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div><div className="ml-3 flex-1 min-w-0"><div className="flex justify-between"><span className="font-bold text-slate-700 text-sm truncate">{u.displayName}</span><span className="text-[10px] bg-white border px-2 py-0.5 rounded-full text-slate-500 flex-shrink-0">{formatDateShort(sO.date)}</span></div><div className="text-xs text-slate-500 mt-1">{sO.time}–{eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div></div></div>);})}
                         {upcoming.length===0&&<p className="text-center text-slate-400 text-xs py-4">Belum ada jadwal</p>}</div>
                     </div>
-                    {/* ═══ ACCOUNT SETTINGS ═══ */}
-                    <div className="glass-strong rounded-2xl border border-white/50 overflow-hidden card-lift">
-                        <button onClick={()=>setShowProfile(!showProfile)} className="w-full px-5 py-4 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{background:session.color||theme.primary}}>{(session.displayName||'?')[0].toUpperCase()}</div>
-                                <div className="text-left"><h3 className="font-bold text-slate-800 text-sm">{session.displayName}</h3><p className="text-[10px] text-slate-400 mt-0.5">@{session.username||'user'} · {me?.bankName?'Info bank lengkap':'Belum isi info bank'}</p></div>
+                    {/* ═══ ACCOUNT SETTINGS MODAL ═══ */}
+                    <Modal show={showProfile} onClose={()=>setShowProfile(false)} title="Pengaturan Akun" wide>
+                        <div className="space-y-5">
+                            {/* Profile summary */}
+                            <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                <div className="w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-bold" style={{background:session.color||theme.primary}}>{(session.displayName||'?')[0].toUpperCase()}</div>
+                                <div><h3 className="font-bold text-slate-800">{session.displayName}</h3><p className="text-[11px] text-slate-400">@{session.username||'user'} · {me?.bankName?<span className="text-green-600"><i className="fas fa-check-circle mr-0.5"></i>Info bank lengkap</span>:<span className="text-amber-500"><i className="fas fa-exclamation-circle mr-0.5"></i>Belum isi info bank</span>}</p></div>
                             </div>
-                            <i className={`fas fa-chevron-${showProfile?'up':'down'} text-slate-300`}></i>
-                        </button>
-                        {showProfile&&(<div className="border-t border-slate-100 p-5 space-y-5">
                             {/* Payment Info */}
                             <div>
                                 <h4 className="text-xs font-bold text-slate-600 mb-3 flex items-center gap-2"><i className="fas fa-university" style={{color:theme.primary}}></i>Informasi Pembayaran</h4>
@@ -1212,7 +1213,6 @@
                                     <button onClick={saveProfile} disabled={profBusy} className="w-full py-2.5 rounded-xl text-white font-bold text-sm transition-all disabled:opacity-40 btn-primary"><i className="fas fa-save mr-2"></i>Simpan Info Pembayaran</button>
                                 </div>
                             </div>
-                            {/* Divider */}
                             <div className="border-t border-slate-100"></div>
                             {/* Password */}
                             <div>
@@ -1229,10 +1229,10 @@
                                         <button onClick={changePassword} disabled={profBusy} className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm transition-all disabled:opacity-40"><i className="fas fa-key mr-1.5"></i>Ubah Password</button>
                                     </div>
                                 </div>)}
-                                {!showPwChange&&<p className="text-[10px] text-slate-400">Password dienkripsi dengan SHA-256. Pastikan gunakan password yang kuat.</p>}
+                                {!showPwChange&&<p className="text-[10px] text-slate-400">Password dienkripsi SHA-256. Gunakan password yang kuat.</p>}
                             </div>
-                        </div>)}
-                    </div>
+                        </div>
+                    </Modal>
                     <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
                 </div>
             );
@@ -1638,12 +1638,16 @@
                             {!hasSel&&pendSh.length>0&&<div className="px-4 pb-3 pt-1"><p className="text-center text-[11px] text-slate-500 italic"><i className="fas fa-hand-point-down mr-1"></i>Pilih laporan di bawah</p></div>}
                         </div>
                         {pendSh.length===0?<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><i className="fas fa-check-circle text-3xl text-slate-200 mb-3 block"></i><p className="text-slate-400 text-sm">Tidak ada tagihan pending</p></div>:
-                        pendByUser.map(grp=>{const u=getU(grp.uid);const uSel=selectedSheets[grp.uid]||new Set();const allSel=grp.sheets.every(s=>uSel.has(s.id));const someSel=grp.sheets.some(s=>uSel.has(s.id));const isExp=expandedUsers[grp.uid]!==false;return(
+                        pendByUser.map(grp=>{const u=getU(grp.uid);const uSel=selectedSheets[grp.uid]||new Set();const allSel=grp.sheets.every(s=>uSel.has(s.id));const someSel=grp.sheets.some(s=>uSel.has(s.id));const isExp=expandedUsers[grp.uid]!==false;const selCount=[...uSel].filter(id=>grp.sheets.some(s=>s.id===id)).length;const selAmt=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+getAmt(s),0);const selMinsU=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+parseInt(s.duration||0),0);return(
                             <div key={grp.uid} className="glass-strong rounded-2xl border overflow-hidden" style={{borderColor:someSel?u.color+'55':'rgba(148,163,184,0.2)'}}>
                                 <div className="flex items-center gap-3 px-3 py-3" style={{backgroundColor:someSel?u.color+'12':'transparent'}}>
                                     <div onClick={()=>toggleAllUser(grp.uid,grp.sheets)} className="flex-shrink-0 cursor-pointer p-1 -ml-1 active:scale-90"><div className="w-6 h-6 rounded-lg border-2 flex items-center justify-center" style={{borderColor:allSel||someSel?u.color:'#cbd5e1',backgroundColor:allSel?u.color:someSel?u.color+'22':'white'}}>{allSel&&<i className="fas fa-check text-white text-[10px]"></i>}{someSel&&!allSel&&<i className="fas fa-minus text-[10px]" style={{color:u.color}}></i>}</div></div>
                                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0 shadow-sm" style={{backgroundColor:u.color}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div>
-                                    <div className="flex-1 min-w-0"><p className="font-black text-slate-800 text-sm">{u.displayName}</p><p className="text-[10px] text-slate-400 mt-0.5">{grp.sheets.length} lap · {fmtDuration(grp.mins)} · {fmtC(grp.total)}</p></div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap"><p className="font-black text-slate-800 text-sm">{u.displayName}</p></div>
+                                        <p className="text-[10px] text-slate-400 mt-0.5">Total: {grp.sheets.length} lap · {fmtDuration(grp.mins)} · {fmtC(grp.total)}</p>
+                                        {someSel&&<p className="text-[10px] font-bold mt-0.5" style={{color:u.color}}><i className="fas fa-check-circle mr-0.5 text-[8px]"></i>Dipilih: {selCount}/{grp.sheets.length} lap · {fmtDuration(selMinsU)} · {fmtC(selAmt)}</p>}
+                                    </div>
                                     <button onClick={()=>setExpU(p=>({...p,[grp.uid]:!isExp}))} className="text-slate-300 p-1"><i className={`fas fa-chevron-${isExp?'up':'down'} text-xs`}></i></button>
                                 </div>
                                 {isExp&&<div className="border-t border-slate-100/80 divide-y divide-slate-50">{grp.sheets.sort((a,b)=>`${b.date}T${b.startTime}`.localeCompare(`${a.date}T${a.startTime}`)).map(ts=>{const isSel=uSel.has(ts.id);const sO=toDisplayTime(ts.startTime,ts.date,tz);const eO=ts.endTime?toDisplayTime(ts.endTime,ts.endDate||ts.date,tz):{time:'...'};return(
