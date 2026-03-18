@@ -877,6 +877,10 @@
         /* ═══════════════════════════════════════════════
            SCHEDULE VIEW — matches v1 ScheduleManager
            ═══════════════════════════════════════════════ */
+
+        /* ═══════════════════════════════════════════════
+           SCHEDULE VIEW — full validation from v1
+           ═══════════════════════════════════════════════ */
         const ScheduleView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings }) => {
             const [showHistory, setShowHistory] = useState(false);
             const [filterMine, setFilterMine] = useState(false);
@@ -897,7 +901,6 @@
             const canDel = (s) => canDelAll || (canDelOwn && s.userId === session.id);
             const getU = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
 
-            // ── PT day nav for timeline ──
             const todayPt = useMemo(() => getPSTDayFromEpoch(Date.now()), []);
             const [mapPt, setMapPt] = useState(() => todayPt);
             const shiftMap = (d) => setMapPt(p => addDays(p, d));
@@ -910,7 +913,7 @@
                 }
             }, [form.startDate, form.startTime, tz]);
 
-            // ── Quota ──
+            // Quota
             const MAX_M = (sysSettings?.dailyQuotaHours || 10) * 60;
             const targetPt = useMemo(() => {
                 if (form.startDate && form.startTime) {
@@ -923,10 +926,7 @@
             const usedM = useMemo(() => {
                 if (!targetPt) return 0;
                 return schedules.filter(s => editId !== s.id && getPSTDay(s.startDate||s.date, s.startTime) === targetPt).reduce((a, s) => {
-                    const sE = getEpochFromWIB(s.startDate||s.date, s.startTime);
-                    let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
-                    if (!s.endDate && eE <= sE) eE += 86400000;
-                    return a + Math.floor((eE - sE) / 60000);
+                    const sE = getEpochFromWIB(s.startDate||s.date, s.startTime); let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= sE) eE += 86400000; return a + Math.floor((eE - sE) / 60000);
                 }, 0);
             }, [schedules, targetPt, editId]);
 
@@ -937,14 +937,13 @@
 
             const newDur = useMemo(() => {
                 if (!form.startDate || !form.startTime || !form.endDate || !form.endTime) return 0;
-                const dbS = toDbTime(form.startTime, form.startDate, tz);
-                const dbE = toDbTime(form.endTime, form.endDate, tz);
+                const dbS = toDbTime(form.startTime, form.startDate, tz); const dbE = toDbTime(form.endTime, form.endDate, tz);
                 return Math.max(0, Math.floor((getEpochFromWIB(dbE.date, dbE.time) - getEpochFromWIB(dbS.date, dbS.time)) / 60000));
             }, [form, tz]);
             const wouldExceed = newDur > 0 && (usedM + newDur > MAX_M);
             const isDirty = form.startDate !== '' || form.startTime !== '14:00' || form.endDate !== '' || form.endTime !== '15:00';
 
-            // ── Filtered list ──
+            // Filtered list
             const filtered = useMemo(() => {
                 let ls = canViewAll ? [...schedules] : schedules.filter(s => s.userId === session.id);
                 if (!showHistory) { const now = Date.now(); ls = ls.filter(s => { let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= getEpochFromWIB(s.startDate||s.date, s.startTime)) eE += 86400000; return eE > now; }); }
@@ -953,16 +952,14 @@
                 return ls;
             }, [schedules, showHistory, filterMine, sortOrder, session.id, canViewAll]);
 
-            // ── Timeline blocks ──
+            // Timeline
             const tlBlocks = useMemo(() => {
                 const bl = [];
                 schedules.forEach(s => {
                     if (editId && s.id === editId) return;
                     if (getPSTDay(s.startDate||s.date, s.startTime) !== mapPt) return;
-                    const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz);
-                    const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
-                    const sM = parseInt(uS.time.split(':')[0])*60 + parseInt(uS.time.split(':')[1]);
-                    const eM = parseInt(uE.time.split(':')[0])*60 + parseInt(uE.time.split(':')[1]);
+                    const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz); const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
+                    const sM = parseInt(uS.time.split(':')[0])*60 + parseInt(uS.time.split(':')[1]); const eM = parseInt(uE.time.split(':')[0])*60 + parseInt(uE.time.split(':')[1]);
                     if (uS.date === uE.date && eM > sM) bl.push({...s, sp:sM/1440*100, wp:(eM-sM)/1440*100, uS, uE});
                     else if (uS.date < uE.date) bl.push({...s, sp:sM/1440*100, wp:(1440-sM)/1440*100, uS, uE});
                 });
@@ -973,96 +970,73 @@
                 if (!form.startDate || !form.startTime || !form.endTime) return null;
                 const sM = parseInt(form.startTime.split(':')[0])*60 + parseInt(form.startTime.split(':')[1]);
                 let eM = parseInt(form.endTime.split(':')[0])*60 + parseInt(form.endTime.split(':')[1]);
-                if (form.endDate > form.startDate) eM = 1440;
-                else if (eM < sM && !form.endDate) eM = 1440;
-                if (eM <= sM) return null;
-                return { sp: sM/1440*100, wp: (eM-sM)/1440*100 };
+                if (form.endDate > form.startDate) eM = 1440; else if (eM < sM && !form.endDate) eM = 1440;
+                if (eM <= sM) return null; return { sp: sM/1440*100, wp: (eM-sM)/1440*100 };
             }, [form]);
 
-            const startEdit = (s) => {
-                const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz);
-                const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
-                setForm({ startDate:uS.date, startTime:uS.time, endDate:uE.date, endTime:uE.time });
-                setEditId(s.id); window.scrollTo({top:0,behavior:'smooth'});
-            };
+            const startEdit = (s) => { const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz); const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz); setForm({ startDate:uS.date, startTime:uS.time, endDate:uE.date, endTime:uE.time }); setEditId(s.id); window.scrollTo({top:0,behavior:'smooth'}); };
             const resetForm = () => { setForm({ startDate:'', startTime:'14:00', endDate:'', endTime:'15:00' }); setEditId(null); };
 
-            // ── Save ──
+            // Save with FRESH READ
             const save = async (e) => {
                 e.preventDefault();
-                if (!form.startDate || !form.startTime || !form.endDate || !form.endTime) { notify('Semua kolom tanggal & waktu wajib diisi','error'); return; }
+                if (!form.startDate || !form.startTime || !form.endDate || !form.endTime) { notify('Semua kolom wajib diisi','error'); return; }
                 const stStr = `${form.startDate}T${form.startTime}`, enStr = `${form.endDate}T${form.endTime}`;
-                if (enStr <= stStr) { notify('Waktu selesai harus setelah waktu mulai','error'); return; }
+                if (enStr <= stStr) { notify('Waktu selesai harus setelah mulai','error'); return; }
                 const dbS = toDbTime(form.startTime, form.startDate, tz), dbE = toDbTime(form.endTime, form.endDate, tz);
                 const nSE = getEpochFromWIB(dbS.date, dbS.time), nEE = getEpochFromWIB(dbE.date, dbE.time);
+
                 // Past check
-                if (!editId) {
-                    const nw = new Date(Date.now() + TZ_CONFIG[tz].offsetUTC * 3600000);
-                    const nwStr = `${nw.getUTCFullYear()}-${String(nw.getUTCMonth()+1).padStart(2,'0')}-${String(nw.getUTCDate()).padStart(2,'0')}T${String(nw.getUTCHours()).padStart(2,'0')}:${String(nw.getUTCMinutes()).padStart(2,'0')}`;
-                    if (stStr < nwStr && (new Date(nwStr) - new Date(stStr)) > 60000) { notify('Tidak bisa membuat jadwal di waktu lampau','error'); return; }
-                }
+                if (!editId) { const nw = new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000); const nwStr=`${nw.getUTCFullYear()}-${String(nw.getUTCMonth()+1).padStart(2,'0')}-${String(nw.getUTCDate()).padStart(2,'0')}T${String(nw.getUTCHours()).padStart(2,'0')}:${String(nw.getUTCMinutes()).padStart(2,'0')}`; if(stStr<nwStr&&(new Date(nwStr)-new Date(stStr))>60000){notify('Tidak bisa membuat jadwal di waktu lampau','error');return;} }
                 // Conflict
-                let conflictU = null;
-                if (schedules.some(s => { if (editId && s.id === editId) return false; const eS = getEpochFromWIB(s.startDate||s.date, s.startTime); let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= eS) eE += 86400000; if (nSE < eE && nEE > eS) { conflictU = getU(s.userId).displayName; return true; } return false; })) { notify(`Jadwal bertabrakan dengan ${conflictU}!`,'error'); return; }
+                let cUser=null; if(schedules.some(s=>{if(editId&&s.id===editId)return false;const eS=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=eS)eE+=86400000;if(nSE<eE&&nEE>eS){cUser=getU(s.userId).displayName;return true;}return false;})){notify(`Jadwal bertabrakan dengan ${cUser}!`,'error');return;}
                 // Quota
-                const ptD = getPSTDayFromEpoch(nSE);
-                const exM = schedules.reduce((a, s) => { if (editId && s.id === editId) return a; if (getPSTDay(s.startDate||s.date, s.startTime) !== ptD) return a; const sE = getEpochFromWIB(s.startDate||s.date, s.startTime); let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= sE) eE += 86400000; return a + Math.floor((eE - sE) / 60000); }, 0);
-                const dur = Math.floor((nEE - nSE) / 60000);
-                if (exM + dur > MAX_M) { const ov = exM + dur - MAX_M; notify(`Kuota PT terlampaui! Sisa ${MAX_M-exM} mnt, jadwal ini ${dur} mnt (lebih ${ov} mnt).`,'error'); return; }
-                // Confirm
-                setBookCfm({ show:true, action: async () => {
+                const ptD=getPSTDayFromEpoch(nSE);const exM=schedules.reduce((a,s)=>{if(editId&&s.id===editId)return a;if(getPSTDay(s.startDate||s.date,s.startTime)!==ptD)return a;const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.floor((eE-sE)/60000);},0);const dur=Math.floor((nEE-nSE)/60000);
+                if(exM+dur>MAX_M){const ov=exM+dur-MAX_M;notify(`Kuota PT terlampaui! Sisa ${MAX_M-exM} mnt, jadwal ${dur} mnt (lebih ${ov} mnt).`,'error');return;}
+
+                setBookCfm({show:true, action: async()=>{
                     setBookCfm({show:false,action:null}); setBusy(true);
                     try {
-                        const col = `tenants/${tenant.id}/schedules`;
-                        const pl = { userId: editId ? (schedules.find(s=>s.id===editId)?.userId||session.id) : session.id, startDate:dbS.date, startTime:dbS.time, endDate:dbE.date, endTime:dbE.time, updatedAt:new Date().toISOString() };
-                        if (editId) { await window.fs.updateDoc(window.fs.doc(window.db, col, editId), pl); notify('Jadwal diperbarui','success'); }
-                        else { pl.createdAt = new Date().toISOString(); await window.fs.addDoc(window.fs.collection(window.db, col), pl); notify('Jadwal dibuat','success'); }
+                        // FRESH READ anti race condition
+                        const freshSnap = await window.fs.getDocs(window.fs.collection(window.db,`tenants/${tenant.id}/schedules`));
+                        const fresh = freshSnap.docs.map(d=>({id:d.id,...d.data()}));
+                        let fUser=null;
+                        if(fresh.some(s=>{if(editId&&s.id===editId)return false;const eS=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=eS)eE+=86400000;if(nSE<eE&&nEE>eS){fUser=getU(s.userId).displayName;return true;}return false;})){setBusy(false);notify(`Jadwal bertabrakan dengan ${fUser}! (data terbaru)`,'error');return;}
+                        const fExM=fresh.reduce((a,s)=>{if(editId&&s.id===editId)return a;if(getPSTDay(s.startDate||s.date,s.startTime)!==ptD)return a;const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.floor((eE-sE)/60000);},0);
+                        if(fExM+dur>MAX_M){setBusy(false);notify(`Kuota penuh (data terbaru)! Sisa ${MAX_M-fExM} mnt.`,'error');return;}
+
+                        const col=`tenants/${tenant.id}/schedules`;
+                        const pl={userId:editId?(schedules.find(s=>s.id===editId)?.userId||session.id):session.id,startDate:dbS.date,startTime:dbS.time,endDate:dbE.date,endTime:dbE.time,updatedAt:new Date().toISOString()};
+                        if(editId){await window.fs.updateDoc(window.fs.doc(window.db,col,editId),pl);notify('Jadwal diperbarui','success');}
+                        else{pl.createdAt=new Date().toISOString();await window.fs.addDoc(window.fs.collection(window.db,col),pl);notify('Jadwal dibuat','success');}
                         resetForm();
-                    } catch(e) { notify('Gagal: '+e.message,'error'); } setBusy(false);
+                    }catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);
                 }});
             };
 
             const del = (id) => {
-                if ((timesheets||[]).some(ts => ts.scheduleId === id)) { notify('Tidak bisa hapus — ada laporan terkait','error'); return; }
-                setCfm({show:true, title:'Hapus Jadwal?', msg:'Jadwal ini akan dihapus permanen.', danger:true, onOk: async ()=>{ setCfm({show:false}); try { await window.fs.deleteDoc(window.fs.doc(window.db, `tenants/${tenant.id}/schedules`, id)); notify('Jadwal dihapus','success'); } catch(e) { notify('Gagal: '+e.message,'error'); }}});
+                if((timesheets||[]).some(ts=>ts.scheduleId===id)){notify('Tidak bisa hapus — ada laporan terkait','error');return;}
+                setCfm({show:true,title:'Hapus Jadwal?',msg:'Jadwal ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/schedules`,id));notify('Jadwal dihapus','success');}catch(e){notify('Gagal: '+e.message,'error');}}});
             };
 
             // Map day summary
-            const mdSch = schedules.filter(s => getPSTDay(s.startDate||s.date, s.startTime) === mapPt);
-            const mdMins = mdSch.reduce((a,s)=>{const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.floor((eE-sE)/60000);},0);
-            const mdPct = Math.min(100, MAX_M>0?mdMins/MAX_M*100:0);
-            const mdOver = mdMins > MAX_M;
+            const mdSch=schedules.filter(s=>getPSTDay(s.startDate||s.date,s.startTime)===mapPt);
+            const mdMins=mdSch.reduce((a,s)=>{const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.floor((eE-sE)/60000);},0);
+            const mdPct=Math.min(100,MAX_M>0?mdMins/MAX_M*100:0);const mdOver=mdMins>MAX_M;
 
             return (
                 <div className="space-y-4 animate-fade-in">
-                    {/* ═══ FORM CARD ═══ */}
-                    {canCreate && (
-                    <div className={`glass-strong rounded-2xl border-t-4 overflow-hidden ${editId?'border-orange-400':''}`} style={editId?{}:{borderTopColor:theme.primary}}>
+                    {canCreate && (<div className={`glass-strong rounded-2xl border-t-4 overflow-hidden ${editId?'border-orange-400':''}`} style={editId?{}:{borderTopColor:theme.primary}}>
                         <div className="px-5 pt-4 pb-3 border-b border-slate-100/80 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                                <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-blue-100'}`}><i className={`fas ${editId?'fa-pen':'fa-calendar-plus'} text-xs ${editId?'text-orange-600':'text-blue-600'}`}></i></span>
-                                {editId ? 'Edit Jadwal' : 'Booking Jadwal'}
-                            </h3>
-                            {(editId || isDirty) && <button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}
+                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-blue-100'}`}><i className={`fas ${editId?'fa-pen':'fa-calendar-plus'} text-xs ${editId?'text-orange-600':'text-blue-600'}`}></i></span>{editId?'Edit Jadwal':'Booking Jadwal'}</h3>
+                            {(editId||isDirty)&&<button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}
                         </div>
                         <div className="p-5 space-y-4">
-                            {/* Quota */}
+                            {/* Quota bar */}
                             <div className={`rounded-2xl border overflow-hidden ${isOver?'border-red-200 bg-red-50':isCrit?'border-orange-100 bg-orange-50/60':'border-slate-100 bg-white'}`}>
                                 <div className="px-4 pt-3 pb-3">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${isOver?'bg-red-100':isCrit?'bg-orange-100':'bg-blue-100'}`}><i className={`fas fa-bolt text-[10px] ${isOver?'text-red-500':isCrit?'text-orange-500':'text-blue-500'}`}></i></div>
-                                            <span className={`text-xs font-bold ${isOver?'text-red-700':isCrit?'text-orange-700':'text-slate-700'}`}>Kuota Tim Harian</span>
-                                        </div>
-                                        <span className="text-slate-400 text-[9px] font-mono font-semibold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">{formatDateShort(targetPt)} PT</span>
-                                    </div>
-                                    <div className="flex items-baseline gap-1.5 mb-2">
-                                        <span className={`text-2xl font-black ${isOver?'text-red-600':isCrit?'text-orange-600':'text-slate-800'}`}>{(usedM/60).toFixed(1)}</span>
-                                        <span className="text-slate-400 text-sm">/ {sysSettings?.dailyQuotaHours||10}j</span>
-                                        <span className={`ml-auto text-[10px] font-bold ${isOver?'text-red-500':isCrit?'text-orange-500':remainM>0?'text-blue-500':'text-slate-400'}`}>
-                                            {isOver?`+${((usedM-MAX_M)/60).toFixed(1)}j Melebihi!`:remainM>0?`${(Math.max(0,remainM)/60).toFixed(1)}j Tersisa`:'Kuota penuh'}
-                                        </span>
-                                    </div>
+                                    <div className="flex items-center justify-between mb-2"><div className="flex items-center gap-2"><div className={`w-6 h-6 rounded-lg flex items-center justify-center ${isOver?'bg-red-100':isCrit?'bg-orange-100':'bg-blue-100'}`}><i className={`fas fa-bolt text-[10px] ${isOver?'text-red-500':isCrit?'text-orange-500':'text-blue-500'}`}></i></div><span className={`text-xs font-bold ${isOver?'text-red-700':isCrit?'text-orange-700':'text-slate-700'}`}>Kuota Tim Harian</span></div><span className="text-slate-400 text-[9px] font-mono bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">{formatDateShort(targetPt)} PT</span></div>
+                                    <div className="flex items-baseline gap-1.5 mb-2"><span className={`text-2xl font-black ${isOver?'text-red-600':isCrit?'text-orange-600':'text-slate-800'}`}>{(usedM/60).toFixed(1)}</span><span className="text-slate-400 text-sm">/ {sysSettings?.dailyQuotaHours||10}j</span><span className={`ml-auto text-[10px] font-bold ${isOver?'text-red-500':isCrit?'text-orange-500':remainM>0?'text-blue-500':'text-slate-400'}`}>{isOver?`+${((usedM-MAX_M)/60).toFixed(1)}j Melebihi!`:remainM>0?`${(Math.max(0,remainM)/60).toFixed(1)}j Tersisa`:'Kuota penuh'}</span></div>
                                     <div className="w-full bg-slate-100 rounded-full h-1.5"><div className={`h-1.5 rounded-full transition-all duration-700 ${isOver?'bg-red-400':isCrit?'bg-orange-400':'bg-blue-500'}`} style={{width:`${usedPct}%`}}/></div>
                                     {tz!=='PT'&&(()=>{const co=getPtCutoffInTz(tz);return<p className="text-[9px] text-slate-400 mt-1.5"><i className="fas fa-clock text-[8px] opacity-40 mr-1"></i>Jendela PT: {co.startStr}–{co.endStr} {TZ_CONFIG[tz]?.short}{co.crossMidnight?' (esok)':''}</p>;})()}
                                 </div>
@@ -1070,116 +1044,36 @@
                             {/* Timeline */}
                             <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
                                 <div className="px-4 py-3" style={{background:`linear-gradient(135deg, ${theme.primaryDark}, ${theme.primary})`}}>
-                                    <div className="flex items-center justify-between">
-                                        <div><h4 className="text-white font-bold text-sm flex items-center gap-2"><i className="fas fa-chart-gantt"></i>Peta Visual</h4><p className="text-white/60 text-[10px] mt-0.5">Semua pengguna · Zona waktu lokal</p></div>
-                                        <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
-                                            <button onClick={()=>shiftMap(-1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-left"></i></button>
-                                            <button onClick={()=>setMapPt(todayPt)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[60px] text-center ${mapPt===todayPt?'bg-white shadow-sm':'text-white hover:bg-white/20'}`} style={mapPt===todayPt?{color:theme.primary}:{}}>{mapPt===todayPt?'Hari Ini':formatDateShort(mapPt)}</button>
-                                            <button onClick={()=>shiftMap(1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-right"></i></button>
-                                        </div>
-                                    </div>
-                                    <div className="mt-2 flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5"><i className="fas fa-clock text-white/40 text-[9px]"></i><span className="text-white/60 text-[9px]">Hari kerja = 00:00–23:59 PT (Pacific Time).</span></div>
+                                    <div className="flex items-center justify-between"><div><h4 className="text-white font-bold text-sm flex items-center gap-2"><i className="fas fa-chart-gantt"></i>Peta Visual</h4><p className="text-white/60 text-[10px] mt-0.5">Semua pengguna · Zona waktu lokal</p></div>
+                                    <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1"><button onClick={()=>shiftMap(-1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-left"></i></button><button onClick={()=>setMapPt(todayPt)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[60px] text-center ${mapPt===todayPt?'bg-white shadow-sm':'text-white hover:bg-white/20'}`} style={mapPt===todayPt?{color:theme.primary}:{}}>{mapPt===todayPt?'Hari Ini':formatDateShort(mapPt)}</button><button onClick={()=>shiftMap(1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-right"></i></button></div></div>
+                                    <div className="mt-2 flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5"><i className="fas fa-clock text-white/40 text-[9px]"></i><span className="text-white/60 text-[9px]">Hari kerja = 00:00–23:59 PT.</span></div>
                                 </div>
-                                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-1">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[9px] font-bold uppercase tracking-wide" style={{color:theme.primary}}><i className="fas fa-clock text-[8px] mr-1"></i>PT: {mapPt}</span>
-                                        <span className={`text-[10px] font-bold ${mdOver?'text-red-500':mdMins>0?'':'text-slate-400'}`} style={!mdOver&&mdMins>0?{color:theme.primary}:{}}>{mdSch.length} jadwal · {(mdMins/60).toFixed(1)}/{sysSettings?.dailyQuotaHours||10}j{mdOver?' (Melebihi!)':''}</span>
+                                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-1"><div className="flex items-center justify-between"><span className="text-[9px] font-bold uppercase tracking-wide" style={{color:theme.primary}}>PT: {mapPt}</span><span className={`text-[10px] font-bold ${mdOver?'text-red-500':mdMins>0?'':'text-slate-400'}`} style={!mdOver&&mdMins>0?{color:theme.primary}:{}}>{mdSch.length} jadwal · {(mdMins/60).toFixed(1)}/{sysSettings?.dailyQuotaHours||10}j{mdOver?' (Melebihi!)':''}</span></div><div className="bg-slate-200 rounded-full h-1"><div className={`h-1 rounded-full transition-all ${mdOver?'bg-red-400':mdMins>0?'bg-blue-400':'bg-slate-300'}`} style={{width:`${mdPct}%`}}/></div></div>
+                                <div className="p-3"><div className="relative w-full h-20 bg-white border border-slate-200 rounded-lg overflow-visible shadow-sm">
+                                    <div className="absolute top-0 left-0 right-0 h-4 border-b border-slate-100 flex justify-between bg-slate-50 rounded-t-lg">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full flex flex-col justify-center relative opacity-60 w-0"><span className={`text-[7px] text-slate-500 font-bold absolute ${h===0?'left-1':h===24?'right-1':'left-1/2 -translate-x-1/2'}`}>{String(h).padStart(2,'0')}:00</span></div>)}</div>
+                                    <div className="absolute inset-y-4 left-0 right-0 flex justify-between pointer-events-none">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full border-l border-slate-200 border-dashed w-0"></div>)}</div>
+                                    <div className="absolute top-4 bottom-0 left-0 right-0 z-10">
+                                        {tlBlocks.map((b,i)=>{const u=getU(b.userId);const dm=Math.round(b.wp/100*1440);return(<div key={b.id||i} className="absolute h-full top-0 group cursor-pointer border-l-2 hover:z-30 hover:-translate-y-1 transition-all" style={{left:`${b.sp}%`,width:`${b.wp}%`,borderColor:u.color,backgroundColor:`${u.color}15`}}><div className="w-full h-1" style={{backgroundColor:u.color}}></div><div className={`hidden group-hover:flex absolute ${b.sp>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-800 text-white text-[10px] p-2 rounded-lg shadow-xl whitespace-nowrap flex-col gap-1 z-50 border border-slate-700`}><div className="flex items-center gap-1.5 border-b border-slate-600 pb-1"><div className="w-2 h-2 rounded-full" style={{backgroundColor:u.color}}></div><span className="font-bold">{u.displayName}</span></div><span className="text-slate-300 font-mono">{b.uS.time}–{b.uE.time} · {fmtDuration(dm)}</span></div></div>);})}
+                                        {prevBlock&&<div className="absolute h-full top-0 border-x-2 border-dashed z-20 pointer-events-none flex items-center justify-center" style={{left:`${prevBlock.sp}%`,width:`${prevBlock.wp}%`,borderColor:theme.primary,backgroundColor:`${theme.primary}08`}}><div className="text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{backgroundColor:theme.primary,opacity:0.8}}>Baru</div></div>}
+                                        {getPSTDayFromEpoch(Date.now())===mapPt&&(()=>{const etzs=td?.enabledTimezones||['WIB'];const noL=new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000);const nm=noL.getUTCHours()*60+noL.getUTCMinutes();const pct=nm/1440*100;const getTzT=(k)=>{const d=new Date(Date.now()+TZ_CONFIG[k].offsetUTC*3600000);return`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;};return(<><div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{left:`${pct}%`}}><div className="absolute top-0 bottom-0 w-0.5 bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div><div className="absolute -top-0.5 w-2.5 h-2.5 bg-red-500 rounded-full shadow" style={{left:'50%',transform:'translateX(-50%)'}}></div></div><div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{left:`${pct}%`,width:'12px',transform:'translateX(-6px)'}}><div className={`hidden group-hover:flex absolute ${pct>75?'right-0':'left-0'} top-0 bg-slate-900/95 backdrop-blur-sm text-white rounded-xl shadow-xl whitespace-nowrap flex-col overflow-hidden border border-white/10`}>{etzs.map((k,i)=>(<div key={k} className={`flex items-center gap-1.5 px-2.5 py-1.5 ${i>0?'border-t border-white/10':''}`}><i className={`fas fa-circle text-[5px] ${k===tz?'text-red-400':'text-cyan-400'}`}></i><span className={`text-[8px] font-semibold ${k===tz?'text-red-300':'text-cyan-300'}`}>{TZ_CONFIG[k]?.short}</span><span className={`text-[9px] font-mono ${k===tz?'text-white font-bold':'text-slate-300'}`}>{getTzT(k)}</span>{k===tz&&<span className="text-slate-400 text-[8px]">Sekarang</span>}</div>))}</div></div></>);})()}
                                     </div>
-                                    <div className="bg-slate-200 rounded-full h-1"><div className={`h-1 rounded-full transition-all ${mdOver?'bg-red-400':mdMins>0?'bg-blue-400':'bg-slate-300'}`} style={{width:`${mdPct}%`}}/></div>
-                                </div>
-                                <div className="p-3">
-                                    <div className="relative w-full h-20 bg-white border border-slate-200 rounded-lg overflow-visible shadow-sm">
-                                        <div className="absolute top-0 left-0 right-0 h-4 border-b border-slate-100 flex justify-between bg-slate-50 rounded-t-lg">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full flex flex-col justify-center relative opacity-60 w-0"><span className={`text-[7px] text-slate-500 font-bold absolute ${h===0?'left-1':h===24?'right-1':'left-1/2 -translate-x-1/2'}`}>{String(h).padStart(2,'0')}:00</span></div>)}</div>
-                                        <div className="absolute inset-y-4 left-0 right-0 flex justify-between pointer-events-none">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full border-l border-slate-200 border-dashed w-0"></div>)}</div>
-                                        <div className="absolute top-4 bottom-0 left-0 right-0 z-10">
-                                            {tlBlocks.map((b,i)=>{const u=getU(b.userId);const dm=Math.round(b.wp/100*1440);return(
-                                                <div key={b.id||i} className="absolute h-full top-0 group cursor-pointer border-l-2 hover:z-30 hover:-translate-y-1 transition-all" style={{left:`${b.sp}%`,width:`${b.wp}%`,borderColor:u.color,backgroundColor:`${u.color}15`}}>
-                                                    <div className="w-full h-1" style={{backgroundColor:u.color}}></div>
-                                                    <div className={`hidden group-hover:flex absolute ${b.sp>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-800 text-white text-[10px] p-2 rounded-lg shadow-xl whitespace-nowrap flex-col gap-1 z-50 border border-slate-700`}>
-                                                        <div className="flex items-center gap-1.5 border-b border-slate-600 pb-1"><div className="w-2 h-2 rounded-full" style={{backgroundColor:u.color}}></div><span className="font-bold">{u.displayName}</span></div>
-                                                        <span className="text-slate-300 font-mono"><i className="far fa-clock mr-1"></i>{b.uS.time} – {b.uE.time}</span>
-                                                        <span className="text-slate-400 text-[9px]"><i className="fas fa-stopwatch mr-1"></i>{fmtDuration(dm)}</span>
-                                                    </div>
-                                                </div>);
-                                            })}
-                                            {prevBlock&&<div className="absolute h-full top-0 border-x-2 border-dashed z-20 pointer-events-none flex items-center justify-center" style={{left:`${prevBlock.sp}%`,width:`${prevBlock.wp}%`,borderColor:theme.primary,backgroundColor:`${theme.primary}08`}}><div className="text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{backgroundColor:theme.primary,opacity:0.8}}>Baru</div></div>}
-                                            {getPSTDayFromEpoch(Date.now())===mapPt&&(()=>{
-                                                const etzs = td?.enabledTimezones || ['WIB'];
-                                                const noLocal=new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000);
-                                                const nm=noLocal.getUTCHours()*60+noLocal.getUTCMinutes();
-                                                const pct=nm/1440*100;
-                                                const getTzTime=(tzk)=>{const d=new Date(Date.now()+TZ_CONFIG[tzk].offsetUTC*3600000);return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;};
-                                                return(<>
-                                                    <div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{left:`${pct}%`}}>
-                                                        <div className="absolute top-0 bottom-0 w-0.5 bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
-                                                        <div className="absolute -top-0.5 w-2.5 h-2.5 bg-red-500 rounded-full shadow" style={{left:'50%',transform:'translateX(-50%)'}}></div>
-                                                    </div>
-                                                    <div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{left:`${pct}%`,width:'12px',transform:'translateX(-6px)'}}>
-                                                        <div className={`hidden group-hover:flex absolute ${pct>75?'right-0':'left-0'} top-0 bg-slate-900/95 backdrop-blur-sm text-white rounded-xl shadow-xl whitespace-nowrap flex-col overflow-hidden border border-white/10`}>
-                                                            {etzs.map((tzk,i)=>(
-                                                                <div key={tzk} className={`flex items-center gap-1.5 px-2.5 py-1.5 ${i>0?'border-t border-white/10':''}`}>
-                                                                    <i className={`fas fa-circle text-[5px] ${tzk===tz?'text-red-400':'text-cyan-400'}`}></i>
-                                                                    <span className={`text-[8px] font-semibold ${tzk===tz?'text-red-300':'text-cyan-300'}`}>{TZ_CONFIG[tzk]?.short||tzk}</span>
-                                                                    <span className={`text-[9px] font-mono ${tzk===tz?'text-white font-bold':'text-slate-300'}`}>{getTzTime(tzk)}</span>
-                                                                    {tzk===tz&&<span className="text-slate-400 text-[8px]">Sekarang</span>}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                </>);
-                                            })()}
-                                        </div>
-                                    </div>
-                                </div>
+                                </div></div>
                             </div>
-                            {/* Form inputs */}
+                            {/* Form */}
                             <form onSubmit={save} className="space-y-3" noValidate>
-                                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100">
-                                    <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-play-circle text-blue-500 text-sm"></i>Mulai <span className="text-slate-300 normal-case">({TZ_CONFIG[tz]?.short})</span></label></div>
-                                    <input type="date" required value={form.startDate} onChange={e=>{if(!form.endDate)setForm({...form,startDate:e.target.value,endDate:e.target.value});else setForm({...form,startDate:e.target.value});}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" />
-                                    <input type="time" required value={form.startTime} onChange={e=>setForm({...form,startTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100">
-                                    <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-stop-circle text-red-500 text-sm"></i>Selesai <span className="text-slate-300 normal-case">({TZ_CONFIG[tz]?.short})</span></label></div>
-                                    <input type="date" required value={form.endDate} onChange={e=>setForm({...form,endDate:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" />
-                                    <input type="time" required value={form.endTime} onChange={e=>setForm({...form,endTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" />
-                                </div>
+                                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100"><div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-play-circle text-blue-500 text-sm"></i>Mulai ({TZ_CONFIG[tz]?.short})</label></div><input type="date" required value={form.startDate} onChange={e=>{if(!form.endDate)setForm({...form,startDate:e.target.value,endDate:e.target.value});else setForm({...form,startDate:e.target.value});}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /><input type="time" required value={form.startTime} onChange={e=>setForm({...form,startTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" /></div>
+                                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100"><div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-stop-circle text-red-500 text-sm"></i>Selesai ({TZ_CONFIG[tz]?.short})</label></div><input type="date" required value={form.endDate} onChange={e=>setForm({...form,endDate:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /><input type="time" required value={form.endTime} onChange={e=>setForm({...form,endTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" /></div>
                                 {newDur>0&&<div className="text-center"><span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:theme.primary50,color:theme.primary}}><i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(newDur)}</span></div>}
-                                <button disabled={busy||wouldExceed||(!editId&&(remainM<=0||isOver))} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${wouldExceed||(!editId&&(remainM<=0||isOver))?'bg-red-500 shadow-red-200':editId?'bg-orange-500 hover:bg-orange-600 shadow-orange-200':'shadow-blue-200 btn-primary'}`}>
-                                    {busy?<i className="fas fa-spinner fa-spin"></i>:wouldExceed?<><i className="fas fa-exclamation-triangle text-xs"></i>Kuota Terlampaui!</>:(!editId&&(remainM<=0||isOver))?<><i className="fas fa-ban text-xs"></i>Kuota Penuh</>:editId?<><i className="fas fa-check text-xs"></i>Simpan</>:<><i className="fas fa-calendar-plus text-xs"></i>Booking</>}
-                                </button>
+                                <button disabled={busy||wouldExceed||(!editId&&(remainM<=0||isOver))} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${wouldExceed||(!editId&&(remainM<=0||isOver))?'bg-red-500 shadow-red-200':editId?'bg-orange-500 hover:bg-orange-600 shadow-orange-200':'shadow-blue-200 btn-primary'}`}>{busy?<i className="fas fa-spinner fa-spin"></i>:wouldExceed?<><i className="fas fa-exclamation-triangle text-xs"></i>Kuota Terlampaui!</>:(!editId&&(remainM<=0||isOver))?<><i className="fas fa-ban text-xs"></i>Kuota Penuh</>:editId?<><i className="fas fa-check text-xs"></i>Simpan</>:<><i className="fas fa-calendar-plus text-xs"></i>Booking</>}</button>
                             </form>
                         </div>
                     </div>)}
-
-                    {/* ═══ LIST ═══ */}
+                    {/* List */}
                     <div className="space-y-3 pb-20">
-                        <div className="glass-strong rounded-2xl border border-white/50 p-3 space-y-2">
-                            <div className="flex justify-between items-center">
-                                <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wide">{showHistory?'Semua Jadwal':'Jadwal Mendatang'}</h3>
-                                <button onClick={()=>setSortOrder(p=>p==='asc'?'desc':'asc')} className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition"><i className={`fas fa-sort-amount-${sortOrder==='asc'?'down-alt':'up'} text-xs`}></i></button>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={()=>{setShowHistory(!showHistory);setSortOrder(!showHistory?'desc':'asc');}} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${showHistory?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={showHistory?{background:theme.primaryDark,borderColor:theme.primaryDark}:{}}>{showHistory?'Tampilkan Mendatang':'Tampilkan Semua'}</button>
-                                <button onClick={()=>setFilterMine(!filterMine)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${filterMine?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={filterMine?{background:theme.primary,borderColor:theme.primary}:{}}>{filterMine?'Hanya Saya':'Semua Pengguna'}</button>
-                            </div>
-                        </div>
+                        <div className="glass-strong rounded-2xl border border-white/50 p-3 space-y-2"><div className="flex justify-between items-center"><h3 className="font-bold text-slate-700 text-xs uppercase tracking-wide">{showHistory?'Semua Jadwal':'Jadwal Mendatang'}</h3><button onClick={()=>setSortOrder(p=>p==='asc'?'desc':'asc')} className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition"><i className={`fas fa-sort-amount-${sortOrder==='asc'?'down-alt':'up'} text-xs`}></i></button></div>
+                        <div className="flex gap-2"><button onClick={()=>{setShowHistory(!showHistory);setSortOrder(!showHistory?'desc':'asc');}} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${showHistory?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={showHistory?{background:theme.primaryDark,borderColor:theme.primaryDark}:{}}>{showHistory?'Tampilkan Mendatang':'Tampilkan Semua'}</button><button onClick={()=>setFilterMine(!filterMine)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${filterMine?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={filterMine?{background:theme.primary,borderColor:theme.primary}:{}}>{filterMine?'Hanya Saya':'Semua Pengguna'}</button></div></div>
                         {filtered.length===0&&<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><div className="text-4xl mb-3">📭</div><p className="text-sm font-semibold text-slate-500">Tidak ada jadwal</p></div>}
-                        {filtered.map((s,idx)=>{const isMine=s.userId===session.id;const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);const u=getU(s.userId);const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;const dm=Math.round((eE-sE)/60000);return(
-                            <div key={s.id} className={`glass-strong p-4 rounded-2xl border flex justify-between items-center card-lift ${isMine?'border-l-4':'border-white/50'}`} style={isMine?{borderLeftColor:theme.primary}:{}}>
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className="w-2 h-10 rounded-full flex-shrink-0" style={{backgroundColor:u.color}}></div>
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2"><span className="font-bold text-slate-700 text-sm">{u.displayName}</span>{isMine&&<span className="text-[10px] font-bold px-1.5 rounded" style={{background:theme.primary50,color:theme.primary}}>Saya</span>}</div>
-                                        <div className="text-xs text-slate-500 mt-1">{formatDateShort(sO.date)} · {sO.time} – {eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>
-                                        {dm>0&&<span className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><i className="far fa-clock text-[9px]"></i>{fmtDuration(dm)}</span>}
-                                    </div>
-                                </div>
-                                {(canEdit(s)||canDel(s))&&<div className="flex gap-1.5 flex-shrink-0 ml-2">
-                                    {canEdit(s)&&<button onClick={()=>startEdit(s)} className="w-8 h-8 rounded-full bg-white border border-blue-100 text-blue-500 hover:bg-blue-50 flex items-center justify-center transition"><i className="fas fa-pen text-xs"></i></button>}
-                                    {canDel(s)&&<button onClick={()=>del(s.id)} className="w-8 h-8 rounded-full bg-white border border-red-100 text-red-500 hover:bg-red-50 flex items-center justify-center transition"><i className="fas fa-trash text-xs"></i></button>}
-                                </div>}
-                            </div>);})}
+                        {filtered.map((s)=>{const isMine=s.userId===session.id;const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);const u=getU(s.userId);const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;const dm=Math.round((eE-sE)/60000);return(<div key={s.id} className={`glass-strong p-4 rounded-2xl border flex justify-between items-center card-lift ${isMine?'border-l-4':'border-white/50'}`} style={isMine?{borderLeftColor:theme.primary}:{}}><div className="flex items-center gap-3 min-w-0"><div className="w-2 h-10 rounded-full flex-shrink-0" style={{backgroundColor:u.color}}></div><div className="min-w-0"><div className="flex items-center gap-2"><span className="font-bold text-slate-700 text-sm">{u.displayName}</span>{isMine&&<span className="text-[10px] font-bold px-1.5 rounded" style={{background:theme.primary50,color:theme.primary}}>Saya</span>}</div><div className="text-xs text-slate-500 mt-1">{formatDateShort(sO.date)} · {sO.time}–{eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>{dm>0&&<span className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><i className="far fa-clock text-[9px]"></i>{fmtDuration(dm)}</span>}</div></div>{(canEdit(s)||canDel(s))&&<div className="flex gap-1.5 flex-shrink-0 ml-2">{canEdit(s)&&<button onClick={()=>startEdit(s)} className="w-8 h-8 rounded-full bg-white border border-blue-100 text-blue-500 hover:bg-blue-50 flex items-center justify-center transition"><i className="fas fa-pen text-xs"></i></button>}{canDel(s)&&<button onClick={()=>del(s.id)} className="w-8 h-8 rounded-full bg-white border border-red-100 text-red-500 hover:bg-red-50 flex items-center justify-center transition"><i className="fas fa-trash text-xs"></i></button>}</div>}</div>);})}
                     </div>
                     <Confirm show={bookCfm.show} title="Konfirmasi Booking" msg="Pastikan data jadwal sudah benar. Lanjutkan?" onOk={bookCfm.action} onNo={()=>setBookCfm({show:false,action:null})} />
                     <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
@@ -1188,117 +1082,72 @@
         };
 
         /* ═══════════════════════════════════════════════
-           DASHBOARD VIEW — matches v1 DashboardView
+           DASHBOARD VIEW — full cards from v1
            ═══════════════════════════════════════════════ */
         const DashboardView = ({ session, td, users, schedules, timesheets, tz, theme, hasPerm, sysSettings }) => {
             const pp = getPayPeriodInfo();
-            const activeUsers = users.filter(u => u.isActive);
+            const getU = (uid) => users.find(u=>u.id===uid) || {displayName:'?',color:'#94a3b8'};
+            const rate = (sysSettings?.baseHourlyRateUSD||15) * (sysSettings?.usdToIdr||16000);
+            const fmtC = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+            const fmtShort = (ds) => {if(!ds)return'';const[,m,d]=ds.split('-');return`${parseInt(d)}/${parseInt(m)}`;};
             const currentEpoch = Date.now();
-            const getU = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
-
-            // Who's working now
-            const activeWorkers = schedules.filter(s => {
-                const sE = getEpochFromWIB(s.startDate||s.date, s.startTime);
-                let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
-                if (!s.endDate && eE <= sE) eE += 86400000;
-                return currentEpoch >= sE && currentEpoch <= eE;
-            }).map(s => { const u = getU(s.userId); return { name:u.displayName, color:u.color, endTime:s.endTime, endDate:s.endDate||s.date, isActive:u.isActive }; }).filter(w => w.isActive !== false);
-
-            // Current time display
             const nowTz = new Date(currentEpoch + TZ_CONFIG[tz].offsetUTC * 3600000);
             const timeDisp = `${String(nowTz.getUTCHours()).padStart(2,'0')}:${String(nowTz.getUTCMinutes()).padStart(2,'0')}`;
 
-            // Upcoming schedules (next 5)
-            const upcoming = schedules.filter(s => {
-                let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
-                if (!s.endDate && eE <= getEpochFromWIB(s.startDate||s.date, s.startTime)) eE += 86400000;
-                return eE > currentEpoch;
-            }).sort((a,b) => getEpochFromWIB(a.startDate||a.date, a.startTime) - getEpochFromWIB(b.startDate||b.date, b.startTime)).slice(0, 5);
+            // Earnings
+            const myPending = timesheets.filter(ts => ts.userId===session.id && ts.status==='pending');
+            const myPendingPeriod = myPending.filter(ts => { const ptD=getPSTDay(ts.date,ts.startTime); return ptD>=pp.currentPeriodStart && ptD<=pp.currentPeriodEnd; });
+            const myPendingCarry = myPending.filter(ts => { const ptD=getPSTDay(ts.date,ts.startTime); return ptD<pp.currentPeriodStart; });
+            const myPendingNext = myPending.filter(ts => { const ptD=getPSTDay(ts.date,ts.startTime); return ptD>pp.currentPeriodEnd; });
+            const thisPeriodHrs = myPendingPeriod.reduce((a,ts)=>a+parseInt(ts.duration||0),0)/60;
+            const carryHrs = myPendingCarry.reduce((a,ts)=>a+parseInt(ts.duration||0),0)/60;
+            const nextHrs = myPendingNext.reduce((a,ts)=>a+parseInt(ts.duration||0),0)/60;
+            const thisPeriodAmt = thisPeriodHrs * rate;
+            const carryAmt = carryHrs * rate;
+            const nextAmt = nextHrs * rate;
+            const totalAmt = thisPeriodAmt + carryAmt + nextAmt;
+            const periodLabel = `${fmtShort(pp.currentPeriodStart)} – ${fmtShort(pp.currentPeriodEnd)}`;
 
-            // Earnings estimate
-            const myPending = timesheets.filter(ts => ts.userId === session.id && ts.status === 'pending');
-            const rate = (sysSettings?.baseHourlyRateUSD || 15) * (sysSettings?.usdToIdr || 16000);
-            const pendingHrs = myPending.reduce((a, ts) => a + (parseInt(ts.duration)||0), 0) / 60;
-            const pendingEarned = pendingHrs * rate;
-            const fmtCur = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+            // Active workers
+            const activeWorkers = schedules.filter(s => { const sE=getEpochFromWIB(s.startDate||s.date,s.startTime); let eE=getEpochFromWIB(s.endDate||s.date,s.endTime); if(!s.endDate&&eE<=sE)eE+=86400000; return currentEpoch>=sE && currentEpoch<=eE; }).map(s=>{const u=getU(s.userId);return{name:u.displayName,color:u.color,endTime:s.endTime,endDate:s.endDate||s.date,isActive:u.isActive};}).filter(w=>w.isActive!==false);
+            // Upcoming
+            const upcoming = schedules.filter(s => { let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=getEpochFromWIB(s.startDate||s.date,s.startTime))eE+=86400000;return eE>currentEpoch; }).sort((a,b)=>getEpochFromWIB(a.startDate||a.date,a.startTime)-getEpochFromWIB(b.startDate||b.date,b.startTime)).slice(0,5);
 
             return (
                 <div className="space-y-4 stagger animate-fade-in">
                     {/* Welcome + Earnings */}
                     <div className="rounded-2xl p-5 text-white shadow-xl relative overflow-hidden" style={{background:`linear-gradient(145deg, ${theme.primaryDark} 0%, ${theme.primary} 55%, ${theme.primaryLight}90 100%)`}}>
-                        <div className="relative z-10">
-                            <h2 className="text-xl font-extrabold leading-tight">Halo, {session.displayName}! 👋</h2>
-                            <p className="text-white/50 text-[11px] mt-1"><i className="fas fa-clock mr-1"></i>{TZ_CONFIG[tz]?.label||tz}</p>
-                        </div>
-                        {pendingHrs > 0 ? (
-                            <div className="relative z-10 mt-4 rounded-2xl p-4" style={{background:'rgba(0,0,0,0.18)', border:'1px solid rgba(255,255,255,0.12)'}}>
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-white/60 text-[10px] font-semibold">Estimasi Pendapatan (Pending)</span>
-                                    <span className="text-[9px] text-white/40 bg-white/10 px-2 py-0.5 rounded-full">{pp.currentPeriodStart?.slice(5)} – {pp.currentPeriodEnd?.slice(5)} PT</span>
+                        <div className="relative z-10"><h2 className="text-xl font-extrabold">Halo, {session.displayName}! 👋</h2><p className="text-white/50 text-[11px] mt-1"><i className="fas fa-clock mr-1"></i>{TZ_CONFIG[tz]?.label}</p></div>
+                        {totalAmt > 0 ? (
+                            <div className="relative z-10 mt-4 rounded-2xl overflow-hidden" style={{background:'rgba(0,0,0,0.18)',border:'1px solid rgba(255,255,255,0.12)'}}>
+                                <div className="px-4 pt-3 pb-2">
+                                    <div className="flex items-center justify-between mb-1"><span className="text-white/60 text-[10px] font-semibold">Estimasi Pendapatan</span><span className="text-[9px] text-white/40 bg-white/10 px-2 py-0.5 rounded-full">{periodLabel} PT</span></div>
+                                    <p className="text-2xl font-black">{fmtC(thisPeriodAmt + carryAmt)}</p>
+                                    <p className="text-[10px] text-white/40 mt-0.5">{(thisPeriodHrs+carryHrs).toFixed(1)}j · Dibayar Rabu {fmtShort(pp.upcomingPayday)}</p>
                                 </div>
-                                <p className="text-2xl font-black text-white">{fmtCur(pendingEarned)}</p>
-                                <p className="text-[10px] text-white/40 mt-1">{pendingHrs.toFixed(1)}j · {myPending.length} laporan pending</p>
+                                {carryHrs > 0 && <div className="flex items-center justify-between px-4 py-2" style={{borderTop:'1px solid rgba(255,255,255,0.06)',background:'rgba(234,179,8,0.08)'}}><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-400/75"></div><span className="text-[9px] text-amber-200/75 font-semibold">Carry-over (periode lalu)</span></div><span className="text-[11px] font-black text-amber-100/85">{fmtC(carryAmt)}</span></div>}
+                                {nextHrs > 0 && <div className="flex items-center justify-between px-4 py-2" style={{borderTop:'1px solid rgba(255,255,255,0.06)',background:'rgba(139,92,246,0.08)'}}><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-violet-400/75"></div><span className="text-[9px] text-violet-200/75 font-semibold">Periode berikutnya</span></div><span className="text-[11px] font-black text-violet-100/85">{fmtC(nextAmt)}</span></div>}
                             </div>
-                        ) : (
-                            <p className="relative z-10 text-white/30 text-sm mt-3 italic">Tidak ada laporan pending.</p>
-                        )}
+                        ) : <p className="relative z-10 text-white/30 text-sm mt-3 italic">Tidak ada laporan pending.</p>}
                         <i className="fas fa-coins absolute -right-6 -bottom-8 text-[80px] text-white opacity-5"></i>
                     </div>
-
-                    {/* Working Now */}
+                    {/* Working now */}
                     <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift">
-                        <div className="flex justify-between items-start mb-3">
-                            <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide flex items-center gap-2">
-                                <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{backgroundColor:'#22c55e'}}></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span></span>
-                                Sedang Bekerja
-                            </h3>
-                            <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-mono">{timeDisp} {TZ_CONFIG[tz]?.short}</span>
-                        </div>
-                        {activeWorkers.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                                {activeWorkers.map((w,i) => (
-                                    <div key={i} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-full pl-1 pr-3 py-1 hover:shadow-sm transition-all">
-                                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black" style={{backgroundColor:w.color||'#94a3b8'}}>{(w.name||'?').substring(0,2).toUpperCase()}</div>
-                                        <span className="text-sm font-bold text-slate-700">{w.name}</span>
-                                        <span className="text-xs text-slate-400">s.d. {toDisplayTime(w.endTime, w.endDate, tz).time}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-slate-400 italic py-2 flex items-center gap-2"><i className="fas fa-moon text-slate-300 text-xs"></i>Tidak ada yang sedang bekerja</p>
-                        )}
+                        <div className="flex justify-between items-start mb-3"><h3 className="font-bold text-slate-700 text-sm flex items-center gap-2"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{backgroundColor:'#22c55e'}}></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span></span>Sedang Bekerja</h3><span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-mono">{timeDisp} {TZ_CONFIG[tz]?.short}</span></div>
+                        {activeWorkers.length>0?<div className="flex flex-wrap gap-2">{activeWorkers.map((w,i)=><div key={i} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-full pl-1 pr-3 py-1"><div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black" style={{backgroundColor:w.color||'#94a3b8'}}>{(w.name||'?').substring(0,2).toUpperCase()}</div><span className="text-sm font-bold text-slate-700">{w.name}</span><span className="text-xs text-slate-400">s.d. {toDisplayTime(w.endTime,w.endDate,tz).time}</span></div>)}</div>:<p className="text-sm text-slate-400 italic py-2"><i className="fas fa-moon text-slate-300 text-xs mr-2"></i>Tidak ada yang sedang bekerja</p>}
                     </div>
-
                     {/* Upcoming */}
                     <div className="glass-strong rounded-2xl border border-white/50 p-5 card-lift">
-                        <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2 text-sm">
-                            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{background:theme.primary50}}><i className="fas fa-calendar-alt text-[10px]" style={{color:theme.primary}}></i></div>
-                            Jadwal Mendatang
-                        </h3>
-                        <div className="space-y-2.5">
-                            {upcoming.map((s,i) => {
-                                const sO = toDisplayTime(s.startTime, s.startDate||s.date, tz);
-                                const eO = toDisplayTime(s.endTime, s.endDate||s.date, tz);
-                                const u = getU(s.userId);
-                                return (
-                                    <div key={s.id} className="flex items-center p-3 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all">
-                                        <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm" style={{backgroundColor:u.color||'#94a3b8'}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div>
-                                        <div className="ml-3 flex-1 min-w-0">
-                                            <div className="flex justify-between"><span className="font-bold text-slate-700 text-sm truncate">{u.displayName}</span><span className="text-[10px] bg-white border px-2 py-0.5 rounded-full text-slate-500 flex-shrink-0">{formatDateShort(sO.date)}</span></div>
-                                            <div className="text-xs text-slate-500 mt-1">{sO.time} – {eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                            {upcoming.length===0&&<p className="text-center text-slate-400 text-xs py-4">Belum ada jadwal mendatang</p>}
-                        </div>
+                        <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2 text-sm"><div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{background:theme.primary50}}><i className="fas fa-calendar-alt text-[10px]" style={{color:theme.primary}}></i></div>Jadwal Mendatang</h3>
+                        <div className="space-y-2.5">{upcoming.map(s=>{const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);const u=getU(s.userId);return(<div key={s.id} className="flex items-center p-3 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all"><div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm" style={{backgroundColor:u.color}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div><div className="ml-3 flex-1 min-w-0"><div className="flex justify-between"><span className="font-bold text-slate-700 text-sm truncate">{u.displayName}</span><span className="text-[10px] bg-white border px-2 py-0.5 rounded-full text-slate-500 flex-shrink-0">{formatDateShort(sO.date)}</span></div><div className="text-xs text-slate-500 mt-1">{sO.time}–{eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div></div></div>);})}
+                        {upcoming.length===0&&<p className="text-center text-slate-400 text-xs py-4">Belum ada jadwal</p>}</div>
                     </div>
                 </div>
             );
         };
 
         /* ═══════════════════════════════════════════════
-           TIMESHEET VIEW — matches v1 ReportManager
+           TIMESHEET VIEW — with ALL v1 validations
            ═══════════════════════════════════════════════ */
         const TimesheetView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings }) => {
             const [form, setForm] = useState({ scheduleId:'', date:'', startTime:'', endDate:'', endTime:'' });
@@ -1317,41 +1166,58 @@
             const canDelAll = hasPerm('timesheet.delete_all');
             const canEdit = (ts) => canEditAll || (canEditOwn && ts.userId === session.id);
             const canDel = (ts) => canDelAll || (canDelOwn && ts.userId === session.id);
-            const getU = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
-            const rate = (sysSettings?.baseHourlyRateUSD || 15) * (sysSettings?.usdToIdr || 16000);
-            const fmtCur = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+            const getU = (uid) => users.find(u=>u.id===uid) || {displayName:'?',color:'#94a3b8'};
+            const rate = (sysSettings?.baseHourlyRateUSD||15);
+            const xRate = (sysSettings?.usdToIdr||16000);
+            const fmtC = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
 
             const isDirty = form.scheduleId||form.date||form.startTime||form.endTime;
 
             const durMins = useMemo(() => {
                 if (!form.date||!form.startTime||!form.endTime) return 0;
-                const dbS = toDbTime(form.startTime, form.date, tz);
-                const dbE = toDbTime(form.endTime, form.endDate||form.date, tz);
-                const sE = getEpochFromWIB(dbS.date, dbS.time);
-                let eE = getEpochFromWIB(dbE.date, dbE.time);
-                if (eE < sE) eE += 86400000;
-                return Math.max(0, Math.round((eE - sE) / 60000));
+                const dbS=toDbTime(form.startTime,form.date,tz); const dbE=toDbTime(form.endTime,form.endDate||form.date,tz);
+                const sE=getEpochFromWIB(dbS.date,dbS.time); let eE=getEpochFromWIB(dbE.date,dbE.time); if(eE<sE)eE+=86400000;
+                return Math.max(0,Math.round((eE-sE)/60000));
             }, [form, tz]);
 
-            // My schedules that can be reported
+            // Schedule dropdown — FULL filtering logic from v1
             const mySchedules = useMemo(() => {
                 return schedules.filter(s => {
                     if (s.userId !== session.id) return false;
-                    const sE = getEpochFromWIB(s.startDate||s.date, s.startTime);
-                    let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
-                    if (!s.endDate && eE <= sE) eE += 86400000;
-                    // Check if already reported
-                    const reported = timesheets.find(ts => ts.userId===session.id && ts.scheduleId===s.id);
-                    if (reported && editId !== reported.id) return false;
-                    if (eE < Date.now() - 30*86400000) return false;
+                    const startEp = getEpochFromWIB(s.startDate||s.date, s.startTime);
+                    let endEp = getEpochFromWIB(s.endDate||s.date, s.endTime);
+                    if (!s.endDate && endEp <= startEp) endEp += 86400000;
+
+                    // Check if already reported (by scheduleId match)
+                    let usedTs = timesheets.find(ts => ts.userId===session.id && ts.scheduleId && ts.scheduleId===s.id);
+
+                    if (!usedTs) {
+                        // Check if PT day already paid
+                        const sPtDay = getPSTDay(s.startDate||s.date, s.startTime);
+                        const isDayPaid = timesheets.some(ts => ts.userId===session.id && ts.status==='paid' && getPSTDay(ts.date,ts.startTime)===sPtDay);
+                        if (isDayPaid) return false;
+                        // Check time overlap with existing timesheets
+                        usedTs = timesheets.find(ts => {
+                            if (ts.userId !== session.id) return false;
+                            if (ts.scheduleId && ts.scheduleId !== s.id) return false;
+                            const tsStart = getEpochFromWIB(ts.date, ts.startTime);
+                            let tsEnd = tsStart;
+                            if (ts.endTime) { tsEnd = getEpochFromWIB(ts.endDate||ts.date, ts.endTime); if(tsEnd<=tsStart)tsEnd+=86400000; }
+                            else if (ts.duration) { tsEnd = tsStart + (ts.duration*60000); }
+                            return (tsStart<=endEp && tsEnd>=startEp) || Math.abs(tsStart-startEp)<=10800000;
+                        });
+                    }
+
+                    if (usedTs) return editId === usedTs.id;
+                    if (endEp < Date.now() - 30*86400000) return false;
                     return true;
-                }).sort((a,b) => getEpochFromWIB(b.startDate||b.date, b.startTime) - getEpochFromWIB(a.startDate||a.date, a.startTime)).slice(0,15);
+                }).sort((a,b) => getEpochFromWIB(b.startDate||b.date,b.startTime) - getEpochFromWIB(a.startDate||a.date,a.startTime)).slice(0,15);
             }, [schedules, timesheets, session.id, editId]);
 
             const filtered = useMemo(() => {
-                let ls = canViewAll ? [...timesheets] : timesheets.filter(ts => ts.userId === session.id);
-                ls = ls.filter(ts => showPaid ? ts.status === 'paid' : ts.status === 'pending');
-                if (filterMine) ls = ls.filter(ts => ts.userId === session.id);
+                let ls = canViewAll ? [...timesheets] : timesheets.filter(ts => ts.userId===session.id);
+                ls = ls.filter(ts => showPaid ? ts.status==='paid' : ts.status==='pending');
+                if (filterMine) ls = ls.filter(ts => ts.userId===session.id);
                 return ls.sort((a,b) => (`${b.date}T${b.startTime}`).localeCompare(`${a.date}T${a.startTime}`));
             }, [timesheets, showPaid, filterMine, session.id, canViewAll]);
 
@@ -1360,224 +1226,180 @@
             const save = async (e) => {
                 e.preventDefault();
                 if (!form.scheduleId||!form.date||!form.startTime||!form.endTime) { notify('Pilih jadwal dan isi waktu aktual','error'); return; }
+                const stStr=`${form.date}T${form.startTime}`,enStr=`${form.endDate||form.date}T${form.endTime}`;
+                if (enStr<=stStr) { notify('Waktu selesai harus setelah mulai','error'); return; }
+
+                // Duplicate check
+                if (timesheets.some(ts => ts.userId===session.id && ts.scheduleId && ts.scheduleId===form.scheduleId && ts.id!==editId)) { notify('Jadwal ini sudah pernah dilaporkan','error'); return; }
+
+                // Early submit check — schedule must have ended
+                const selSch = schedules.find(s => s.id===form.scheduleId);
+                if (selSch) {
+                    const schStart = getEpochFromWIB(selSch.startDate||selSch.date, selSch.startTime);
+                    let schEnd = getEpochFromWIB(selSch.endDate||selSch.date, selSch.endTime);
+                    if (schEnd <= schStart) schEnd += 86400000;
+                    if (Date.now() < (schEnd - 120000)) { notify('Jadwal belum selesai. Tunggu hingga 2 menit sebelum selesai.','error'); return; }
+                }
+
+                // Overlap check with existing timesheets
+                const dbS=toDbTime(form.startTime,form.date,tz), dbE=toDbTime(form.endTime,form.endDate||form.date,tz);
+                const nSE=getEpochFromWIB(dbS.date,dbS.time); let nEE=getEpochFromWIB(dbE.date,dbE.time); if(nEE<=nSE)nEE+=86400000;
+                const hasOverlap = timesheets.some(ts => {
+                    if (ts.userId!==session.id) return false;
+                    if (editId && ts.id===editId) return false;
+                    const exS=getEpochFromWIB(ts.date,ts.startTime); let exE;
+                    if(ts.endTime){exE=getEpochFromWIB(ts.endDate||ts.date,ts.endTime);if(exE<=exS)exE+=86400000;} else if(ts.duration){exE=exS+ts.duration*60000;} else return false;
+                    return nSE<exE && nEE>exS;
+                });
+                if (hasOverlap) { notify('Waktu tumpang tindih dengan laporan lain','error'); return; }
                 if (durMins <= 0) { notify('Durasi harus lebih dari 0','error'); return; }
 
-                // Confirm via checklist
                 setTsCfm({show:true, action: async () => {
                     setTsCfm({show:false,action:null}); setBusy(true);
                     try {
-                        const dbS = toDbTime(form.startTime, form.date, tz);
-                        const dbE = toDbTime(form.endTime, form.endDate||form.date, tz);
-                        const payload = {
-                            userId: session.id,
-                            scheduleId: form.scheduleId,
-                            date: dbS.date, startTime: dbS.time,
-                            endDate: dbE.date, endTime: dbE.time,
-                            duration: durMins,
-                            paymentUSD: ((durMins/60)*(sysSettings?.baseHourlyRateUSD||15)).toFixed(2),
-                            status: editId ? (timesheets.find(t=>t.id===editId)?.status||'pending') : 'pending',
-                            updatedAt: new Date().toISOString(),
-                        };
-                        const col = `tenants/${tenant.id}/timesheets`;
-                        if (editId) { await window.fs.updateDoc(window.fs.doc(window.db, col, editId), payload); notify('Laporan diperbarui','success'); }
-                        else { payload.createdAt = new Date().toISOString(); await window.fs.addDoc(window.fs.collection(window.db, col), payload); notify('Laporan berhasil dikirim','success'); }
+                        const usd = ((durMins/60)*rate).toFixed(2);
+                        const idr = Math.round((durMins/60)*rate*xRate);
+                        const payload = { userId:session.id, scheduleId:form.scheduleId, date:dbS.date, startTime:dbS.time, endDate:dbE.date, endTime:dbE.time, duration:durMins, paymentUSD:usd, paymentIDR:idr, status:editId?(timesheets.find(t=>t.id===editId)?.status||'pending'):'pending', updatedAt:new Date().toISOString() };
+                        const col=`tenants/${tenant.id}/timesheets`;
+                        if(editId){await window.fs.updateDoc(window.fs.doc(window.db,col,editId),payload);notify('Laporan diperbarui','success');}
+                        else{payload.createdAt=new Date().toISOString();await window.fs.addDoc(window.fs.collection(window.db,col),payload);notify('Laporan dikirim','success');}
                         resetForm();
-                    } catch(e) { notify('Gagal: '+e.message,'error'); } setBusy(false);
+                    }catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);
                 }});
             };
 
-            const startEdit = (ts) => {
-                const sO = toDisplayTime(ts.startTime, ts.date, tz);
-                const eO = toDisplayTime(ts.endTime, ts.endDate||ts.date, tz);
-                setForm({ scheduleId:ts.scheduleId||'', date:sO.date, startTime:sO.time, endDate:eO.date, endTime:eO.time });
-                setEditId(ts.id); window.scrollTo({top:0,behavior:'smooth'});
-            };
+            const startEdit = (ts) => { const sO=toDisplayTime(ts.startTime,ts.date,tz); let eDate=ts.endDate||ts.date,eTime=ts.endTime; if(!eTime&&ts.duration){const ep=getEpochFromWIB(ts.date,ts.startTime)+ts.duration*60000;const d=new Date(ep+TZ_CONFIG[tz].offsetUTC*3600000);eDate=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;eTime=`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;} else if(eTime){const uE=toDisplayTime(eTime,eDate,tz);eDate=uE.date;eTime=uE.time;} setForm({scheduleId:ts.scheduleId||'',date:sO.date,startTime:sO.time,endDate:eDate,endTime:eTime||''});setEditId(ts.id);window.scrollTo({top:0,behavior:'smooth'}); };
+            const del = (id) => { setCfm({show:true,title:'Hapus Laporan?',msg:'Laporan ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id));notify('Laporan dihapus','success');}catch(e){notify('Gagal','error');}}}); };
 
-            const del = (id) => {
-                setCfm({show:true,title:'Hapus Laporan?',msg:'Laporan ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id));notify('Laporan dihapus','success');}catch(e){notify('Gagal: '+e.message,'error');}}});
-            };
-
-            // Pay period info
             const pp = getPayPeriodInfo();
-            const fmtShort = (ds) => { if(!ds)return''; const[,m,d]=ds.split('-'); return `${parseInt(d)}/${parseInt(m)}`; };
+            const fmtShort = (ds) => {if(!ds)return'';const[,m,d]=ds.split('-');return`${parseInt(d)}/${parseInt(m)}`;};
 
             return (
                 <div className="space-y-4 animate-fade-in">
-                    {/* Form */}
-                    {canCreate && (
-                    <div className={`glass-strong rounded-2xl border-t-4 overflow-hidden ${editId?'border-orange-400':''}`} style={editId?{}:{borderTopColor:'#22c55e'}}>
-                        <div className="px-5 pt-4 pb-3 border-b border-slate-100/80 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                                <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-green-100'}`}><i className={`fas ${editId?'fa-pen':'fa-file-alt'} text-xs ${editId?'text-orange-600':'text-green-600'}`}></i></span>
-                                {editId?'Edit Laporan':'Kirim Laporan Kerja'}
-                            </h3>
-                            {(editId||isDirty)&&<button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}
-                        </div>
+                    {canCreate && (<div className={`glass-strong rounded-2xl border-t-4 overflow-hidden ${editId?'border-orange-400':''}`} style={editId?{}:{borderTopColor:'#22c55e'}}>
+                        <div className="px-5 pt-4 pb-3 border-b border-slate-100/80 flex justify-between items-center"><h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-green-100'}`}><i className={`fas ${editId?'fa-pen':'fa-file-alt'} text-xs ${editId?'text-orange-600':'text-green-600'}`}></i></span>{editId?'Edit Laporan':'Kirim Laporan Kerja'}</h3>{(editId||isDirty)&&<button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}</div>
                         <form onSubmit={save} className="p-5 space-y-4" noValidate>
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2"><i className="fas fa-calendar-check text-blue-500 text-sm"></i>Pilih Jadwal</label>
-                                <select value={form.scheduleId} onChange={e=>{const sid=e.target.value;if(!sid){resetForm();return;}const s=schedules.find(x=>x.id===sid);if(s){const uS=toDisplayTime(s.startTime,s.startDate||s.date,tz);const uE=toDisplayTime(s.endTime,s.endDate||s.date,tz);setForm({scheduleId:sid,date:uS.date,startTime:uS.time,endDate:uE.date,endTime:uE.time});}}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-medium" required>
-                                    <option value="" disabled>-- Pilih jadwal --</option>
-                                    {mySchedules.map(s=>{const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);return<option key={s.id} value={s.id}>{formatDateShort(sO.date)} · {sO.time} – {eO.time}</option>;})}
-                                </select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100">
-                                <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-play-circle text-green-500 text-sm"></i>Mulai Aktual <span className="text-slate-300 normal-case">({TZ_CONFIG[tz]?.short})</span></label></div>
-                                <input type="date" required value={form.date} onChange={e=>{if(!form.endDate)setForm({...form,date:e.target.value,endDate:e.target.value});else setForm({...form,date:e.target.value});}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" />
-                                <input type="time" required value={form.startTime} onChange={e=>setForm({...form,startTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100">
-                                <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-stop-circle text-red-500 text-sm"></i>Selesai Aktual <span className="text-slate-300 normal-case">({TZ_CONFIG[tz]?.short})</span></label></div>
-                                <input type="date" required value={form.endDate||form.date} onChange={e=>setForm({...form,endDate:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" />
-                                <input type="time" required value={form.endTime} onChange={e=>setForm({...form,endTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" />
-                            </div>
-                            {durMins>0&&<div className="flex justify-between items-center text-xs bg-green-50 text-green-700 p-3 rounded-xl border border-green-100">
-                                <span><i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(durMins)}</span>
-                                <span className="font-bold">{fmtCur((durMins/60)*rate)}</span>
-                            </div>}
-                            <button disabled={busy||durMins===0} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${editId?'bg-orange-500 hover:bg-orange-600':'bg-green-600 hover:bg-green-700'}`}>
-                                {busy?<i className="fas fa-spinner fa-spin"></i>:editId?<><i className="fas fa-save text-xs"></i>Simpan</>:<><i className="fas fa-paper-plane text-xs"></i>Kirim Laporan</>}
-                            </button>
+                            <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2"><i className="fas fa-calendar-check text-blue-500 text-sm"></i>Pilih Jadwal</label>
+                            <div className="relative"><select value={form.scheduleId} onChange={e=>{const sid=e.target.value;if(!sid){resetForm();return;}const s=schedules.find(x=>x.id===sid);if(s){const uS=toDisplayTime(s.startTime,s.startDate||s.date,tz);const uE=toDisplayTime(s.endTime,s.endDate||s.date,tz);setForm({scheduleId:sid,date:uS.date,startTime:uS.time,endDate:uE.date,endTime:uE.time});}}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-medium appearance-none pr-8" required><option value="" disabled>-- Pilih jadwal --</option>{mySchedules.map(s=>{const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);return<option key={s.id} value={s.id}>{formatDateShort(sO.date)} · {sO.time}–{eO.time}</option>;})}</select><div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"><i className="fas fa-chevron-down text-slate-400 text-xs"></i></div></div></div>
+                            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100"><div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-play-circle text-green-500 text-sm"></i>Mulai Aktual ({TZ_CONFIG[tz]?.short})</label></div><input type="date" required value={form.date} onChange={e=>{if(!form.endDate)setForm({...form,date:e.target.value,endDate:e.target.value});else setForm({...form,date:e.target.value});}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /><input type="time" required value={form.startTime} onChange={e=>setForm({...form,startTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" /></div>
+                            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100"><div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-stop-circle text-red-500 text-sm"></i>Selesai Aktual ({TZ_CONFIG[tz]?.short})</label></div><input type="date" required value={form.endDate||form.date} onChange={e=>setForm({...form,endDate:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /><input type="time" required value={form.endTime} onChange={e=>setForm({...form,endTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" /></div>
+                            {durMins>0&&<div className="flex justify-between items-center text-xs bg-green-50 text-green-700 p-3 rounded-xl border border-green-100"><span><i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(durMins)}</span><span className="font-bold">{fmtC((durMins/60)*rate*xRate)}</span></div>}
+                            <button disabled={busy||durMins===0} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${editId?'bg-orange-500 hover:bg-orange-600':'bg-green-600 hover:bg-green-700'}`}>{busy?<i className="fas fa-spinner fa-spin"></i>:editId?<><i className="fas fa-save text-xs"></i>Simpan</>:<><i className="fas fa-paper-plane text-xs"></i>Kirim Laporan</>}</button>
                         </form>
                     </div>)}
-
-                    {/* Pay period info */}
-                    <div className="glass-strong rounded-2xl border border-white/50 p-4">
-                        <div className="flex items-center gap-0 bg-white border border-slate-200 rounded-xl overflow-hidden">
-                            <div className="flex-1 px-3 py-2.5 border-r border-slate-100">
-                                <p className="text-[9px] text-slate-400 font-semibold uppercase">Periode Berjalan</p>
-                                <p className="text-sm font-black text-slate-800 mt-0.5">{fmtShort(pp.currentPeriodStart)} – {fmtShort(pp.currentPeriodEnd)}</p>
-                                <p className="text-[9px] text-slate-400 mt-0.5">PT timezone</p>
-                            </div>
-                            <div className="px-3 py-2.5 text-center flex-shrink-0">
-                                <p className="text-[9px] font-semibold uppercase" style={{color:theme.primary}}>Dibayar</p>
-                                <p className="text-sm font-black mt-0.5" style={{color:theme.primaryDark}}>{fmtShort(pp.upcomingPayday)}</p>
-                                <p className="text-[9px] text-slate-400 mt-0.5">Rabu</p>
-                            </div>
-                        </div>
-                    </div>
-
+                    {/* Pay period */}
+                    <div className="glass-strong rounded-2xl border border-white/50 p-4"><div className="flex items-center gap-0 bg-white border border-slate-200 rounded-xl overflow-hidden"><div className="flex-1 px-3 py-2.5 border-r border-slate-100"><p className="text-[9px] text-slate-400 font-semibold uppercase">Periode</p><p className="text-sm font-black text-slate-800 mt-0.5">{fmtShort(pp.currentPeriodStart)}–{fmtShort(pp.currentPeriodEnd)}</p><p className="text-[9px] text-slate-400 mt-0.5">PT</p></div><div className="px-3 py-2.5 text-center flex-shrink-0"><p className="text-[9px] font-semibold uppercase" style={{color:theme.primary}}>Dibayar</p><p className="text-sm font-black mt-0.5" style={{color:theme.primaryDark}}>{fmtShort(pp.upcomingPayday)}</p><p className="text-[9px] text-slate-400 mt-0.5">Rabu</p></div></div></div>
                     {/* List */}
                     <div className="space-y-3 pb-20">
                         <div className="glass-strong rounded-2xl border border-white/50 p-3 flex gap-2">
                             <button onClick={()=>setShowPaid(false)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${!showPaid?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={!showPaid?{background:'#f59e0b',borderColor:'#f59e0b'}:{}}>Pending</button>
                             <button onClick={()=>setShowPaid(true)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${showPaid?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={showPaid?{background:'#22c55e',borderColor:'#22c55e'}:{}}>Dibayar</button>
-                            {canViewAll&&<button onClick={()=>setFilterMine(!filterMine)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${filterMine?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={filterMine?{background:theme.primary,borderColor:theme.primary}:{}}>{filterMine?'Hanya Saya':'Semua'}</button>}
+                            {canViewAll&&<button onClick={()=>setFilterMine(!filterMine)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${filterMine?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={filterMine?{background:theme.primary,borderColor:theme.primary}:{}}>{filterMine?'Saya':'Semua'}</button>}
                         </div>
-                        {filtered.length===0&&<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><div className="text-4xl mb-3">📋</div><p className="text-sm font-semibold text-slate-500">Tidak ada laporan {showPaid?'yang sudah dibayar':'pending'}</p></div>}
-                        {filtered.map(ts=>{const u=getU(ts.userId);const isMine=ts.userId===session.id;const sO=toDisplayTime(ts.startTime,ts.date,tz);const eO=toDisplayTime(ts.endTime,ts.endDate||ts.date,tz);const dm=parseInt(ts.duration)||0;const amt=parseFloat(ts.paymentUSD||0)*((sysSettings?.usdToIdr||16000));return(
+                        {filtered.length===0&&<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><div className="text-4xl mb-3">📋</div><p className="text-sm font-semibold text-slate-500">Tidak ada laporan {showPaid?'dibayar':'pending'}</p></div>}
+                        {filtered.map(ts=>{const u=getU(ts.userId);const isMine=ts.userId===session.id;const sO=toDisplayTime(ts.startTime,ts.date,tz);const eO=ts.endTime?toDisplayTime(ts.endTime,ts.endDate||ts.date,tz):{time:'...'};const dm=parseInt(ts.duration)||0;const amt=(parseFloat(ts.paymentUSD||0))*xRate;return(
                             <div key={ts.id} className="glass-strong p-4 rounded-2xl border border-white/50 card-lift">
-                                <div className="flex justify-between items-start">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-2 h-10 rounded-full flex-shrink-0" style={{backgroundColor:u.color}}></div>
-                                        <div className="min-w-0">
-                                            <span className="font-bold text-slate-700 text-sm">{u.displayName}</span>
-                                            <div className="text-xs text-slate-500 mt-1">{formatDateShort(sO.date)} · {sO.time} – {eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>
-                                            {dm>0&&<span className="text-[10px] text-slate-400"><i className="far fa-clock text-[9px] mr-1"></i>{fmtDuration(dm)}</span>}
-                                        </div>
-                                    </div>
-                                    <div className="text-right flex-shrink-0 ml-2">
-                                        <p className="font-bold text-green-600 text-sm">{fmtCur(amt)}</p>
-                                    </div>
-                                </div>
-                                <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${ts.status==='paid'?'bg-green-100 text-green-600':'bg-orange-100 text-orange-600'}`}>{ts.status==='paid'?'Dibayar':'Pending'}</span>
-                                    {isMine&&ts.status!=='paid'&&(canEdit(ts)||canDel(ts))&&<div className="flex gap-2">
-                                        {canEdit(ts)&&<button onClick={()=>startEdit(ts)} className="text-xs text-blue-500 hover:text-blue-700"><i className="fas fa-pen"></i></button>}
-                                        {canDel(ts)&&<button onClick={()=>del(ts.id)} className="text-xs text-red-500 hover:text-red-700"><i className="fas fa-trash"></i></button>}
-                                    </div>}
-                                </div>
+                                <div className="flex justify-between items-start"><div className="flex items-center gap-3 min-w-0"><div className="w-2 h-10 rounded-full flex-shrink-0" style={{backgroundColor:u.color}}></div><div className="min-w-0"><span className="font-bold text-slate-700 text-sm">{u.displayName}</span><div className="text-xs text-slate-500 mt-1">{formatDateShort(sO.date)} · {sO.time}–{eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>{dm>0&&<span className="text-[10px] text-slate-400"><i className="far fa-clock text-[9px] mr-1"></i>{fmtDuration(dm)}</span>}</div></div><div className="text-right flex-shrink-0 ml-2"><p className="font-bold text-green-600 text-sm">{fmtC(amt)}</p></div></div>
+                                <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center"><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${ts.status==='paid'?'bg-green-100 text-green-600':'bg-orange-100 text-orange-600'}`}>{ts.status==='paid'?'Dibayar':'Pending'}</span>{isMine&&ts.status!=='paid'&&(canEdit(ts)||canDel(ts))&&<div className="flex gap-2">{canEdit(ts)&&<button onClick={()=>startEdit(ts)} className="text-xs text-blue-500 hover:text-blue-700"><i className="fas fa-pen"></i></button>}{canDel(ts)&&<button onClick={()=>del(ts.id)} className="text-xs text-red-500 hover:text-red-700"><i className="fas fa-trash"></i></button>}</div>}</div>
                             </div>);})}
                     </div>
-                    {/* Confirm modals */}
-                    <Confirm show={tsCfm.show} title="Konfirmasi Kirim Laporan" msg="Pastikan data laporan sudah akurat. Lanjutkan?" onOk={tsCfm.action} onNo={()=>setTsCfm({show:false,action:null})} />
+                    <Confirm show={tsCfm.show} title="Konfirmasi Kirim Laporan" msg="Pastikan waktu kerja aktual sudah akurat. Lanjutkan?" onOk={tsCfm.action} onNo={()=>setTsCfm({show:false,action:null})} />
                     <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
                 </div>
             );
         };
 
         /* ═══════════════════════════════════════════════
-           ANALYTICS VIEW — basic stats
+           ANALYTICS VIEW — Personal + Team tabs from v1
            ═══════════════════════════════════════════════ */
         const AnalyticsView = ({ schedules, timesheets, users, session, tz, theme, hasPerm, sysSettings }) => {
+            const [tab, setTab] = useState('personal');
             const canViewAll = hasPerm('analytics.view_all');
-            const myTs = timesheets.filter(ts => ts.userId === session.id);
-            const allTs = canViewAll ? timesheets : myTs;
-            const getU = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
+            const getU = (uid) => users.find(u=>u.id===uid) || {displayName:'?',color:'#94a3b8'};
             const rate = (sysSettings?.baseHourlyRateUSD||15) * (sysSettings?.usdToIdr||16000);
-            const fmtCur = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+            const fmtC = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
 
-            const pendingTs = allTs.filter(ts=>ts.status==='pending');
-            const paidTs = allTs.filter(ts=>ts.status==='paid');
-            const totalPendingMins = pendingTs.reduce((a,ts)=>a+parseInt(ts.duration||0),0);
-            const totalPaidMins = paidTs.reduce((a,ts)=>a+parseInt(ts.duration||0),0);
-            const totalPendingAmt = pendingTs.reduce((a,ts)=>a+parseFloat(ts.paymentUSD||0),0) * (sysSettings?.usdToIdr||16000);
-            const totalPaidAmt = paidTs.reduce((a,ts)=>a+parseFloat(ts.paymentUSD||0),0) * (sysSettings?.usdToIdr||16000);
+            // 7 PT days
+            const rangeDays = useMemo(() => {
+                const d=[];const cur=getPSTDayFromEpoch(Date.now());const[y,m,dd]=cur.split('-').map(Number);
+                for(let i=0;i<7;i++){const t=new Date(Date.UTC(y,m-1,dd-i));d.push(`${t.getUTCFullYear()}-${String(t.getUTCMonth()+1).padStart(2,'0')}-${String(t.getUTCDate()).padStart(2,'0')}`);}return d;
+            }, []);
 
-            // Per user breakdown (if canViewAll)
-            const byUser = useMemo(() => {
-                if (!canViewAll) return [];
-                const map = {};
-                allTs.forEach(ts => {
-                    if (!map[ts.userId]) map[ts.userId] = { pendingMins:0, paidMins:0, pendingAmt:0, paidAmt:0, count:0 };
-                    const m = parseInt(ts.duration||0);
-                    const a = parseFloat(ts.paymentUSD||0) * (sysSettings?.usdToIdr||16000);
-                    map[ts.userId].count++;
-                    if (ts.status==='paid') { map[ts.userId].paidMins+=m; map[ts.userId].paidAmt+=a; }
-                    else { map[ts.userId].pendingMins+=m; map[ts.userId].pendingAmt+=a; }
-                });
-                return Object.entries(map).map(([uid,d])=>({uid,...d})).sort((a,b)=>(b.paidMins+b.pendingMins)-(a.paidMins+a.pendingMins));
-            }, [allTs, canViewAll, sysSettings]);
+            // Personal
+            const my7Sh = timesheets.filter(ts=>ts.userId===session.id && rangeDays.includes(getPSTDay(ts.date,ts.startTime)));
+            const my7Mins = my7Sh.reduce((a,ts)=>a+parseInt(ts.duration||0),0);
+            const myPending = timesheets.filter(ts=>ts.userId===session.id && ts.status==='pending');
+            const myPendMins = myPending.reduce((a,ts)=>a+parseInt(ts.duration||0),0);
+            const myPaid = timesheets.filter(ts=>ts.userId===session.id && ts.status==='paid');
+            const myPaidMins = myPaid.reduce((a,ts)=>a+parseInt(ts.duration||0),0);
+
+            // Team
+            const allTs = canViewAll ? timesheets : timesheets.filter(ts=>ts.userId===session.id);
+            const teamMins = allTs.reduce((a,ts)=>a+parseInt(ts.duration||0),0);
+            const leaderboard = useMemo(()=>{const m={};allTs.forEach(ts=>{if(!m[ts.userId])m[ts.userId]={mins:0};m[ts.userId].mins+=parseInt(ts.duration||0);});return Object.entries(m).map(([uid,d])=>({uid,mins:d.mins,...getU(uid)})).sort((a,b)=>b.mins-a.mins).slice(0,5);},[allTs]);
+            const dailyAct = rangeDays.map(d=>({date:d,mins:allTs.reduce((a,ts)=>getPSTDay(ts.date,ts.startTime)===d?a+parseInt(ts.duration||0):a,0)}));
+            const maxDaily = Math.max(...dailyAct.map(d=>d.mins),60);
+
+            // Discipline
+            const discipline = useMemo(()=>rangeDays.map(pstD=>{
+                const daySch=schedules.filter(s=>s.userId===session.id&&getPSTDay(s.startDate||s.date,s.startTime)===pstD).map(s=>{const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return{id:s.id,planMins:(eE-sE)/60000,actualMins:0,start:toDisplayTime(s.startTime,s.startDate||s.date,tz).time,end:toDisplayTime(s.endTime,s.endDate||s.date,tz).time};});
+                const dayTs=timesheets.filter(ts=>ts.userId===session.id&&getPSTDay(ts.date,ts.startTime)===pstD);const unplanned=[];
+                dayTs.forEach(ts=>{let best=ts.scheduleId?daySch.find(s=>s.id===ts.scheduleId):null;if(!best){daySch.forEach(s=>{const diff=Math.abs(getEpochFromWIB(ts.date,ts.startTime)-getEpochFromWIB(pstD,s.start.replace(':','')))/60000;if(diff<180&&(!best))best=s;});}if(best)best.actualMins+=parseInt(ts.duration||0);else unplanned.push(ts);});
+                return{date:pstD,schedules:daySch,unplanned};
+            }),[schedules,timesheets,session.id,rangeDays,tz]);
+
+            const pp=getPayPeriodInfo();const fmtSh=(ds)=>{if(!ds)return'';const[,m,d]=ds.split('-');return`${parseInt(d)}/${parseInt(m)}`;};
 
             return (
                 <div className="space-y-4 stagger animate-fade-in pb-20">
-                    <h2 className="text-lg font-bold text-slate-800"><i className="fas fa-chart-pie mr-2" style={{color:theme.primary}}></i>Analitik</h2>
-                    {/* Summary cards */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift">
-                            <p className="text-[10px] font-bold text-orange-500 uppercase mb-1">Pending</p>
-                            <p className="text-xl font-black text-slate-800">{fmtCur(totalPendingAmt)}</p>
-                            <p className="text-[10px] text-slate-400 mt-1">{fmtDuration(totalPendingMins)} · {pendingTs.length} laporan</p>
-                        </div>
-                        <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift">
-                            <p className="text-[10px] font-bold text-green-500 uppercase mb-1">Dibayar</p>
-                            <p className="text-xl font-black text-slate-800">{fmtCur(totalPaidAmt)}</p>
-                            <p className="text-[10px] text-slate-400 mt-1">{fmtDuration(totalPaidMins)} · {paidTs.length} laporan</p>
-                        </div>
+                    <div className="glass-strong rounded-2xl border border-white/50 p-1.5 flex gap-1">
+                        <button onClick={()=>setTab('personal')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${tab==='personal'?'bg-white shadow-sm text-blue-600':'text-slate-400 hover:text-blue-500'}`}>Pribadi</button>
+                        {canViewAll&&<button onClick={()=>setTab('team')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${tab==='team'?'bg-white shadow-sm text-indigo-600':'text-slate-400 hover:text-indigo-500'}`}>Tim</button>}
                     </div>
-                    {/* Per user breakdown */}
-                    {canViewAll && byUser.length > 0 && (
-                        <div className="glass-strong rounded-2xl border border-white/50 overflow-hidden">
-                            <div className="px-5 py-3 border-b border-slate-100"><h3 className="text-sm font-bold text-slate-800">Per Pengguna</h3></div>
-                            <div className="divide-y divide-slate-100/80">
-                                {byUser.map(d=>{const u=getU(d.uid);const total=d.paidMins+d.pendingMins;return(
-                                    <div key={d.uid} className="px-5 py-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:u.color}}>{(u.displayName||'?')[0].toUpperCase()}</div>
-                                            <div>
-                                                <p className="text-sm font-semibold text-slate-800">{u.displayName}</p>
-                                                <p className="text-[10px] text-slate-400">{d.count} laporan · {fmtDuration(total)}</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-sm font-bold text-slate-700">{fmtCur(d.paidAmt+d.pendingAmt)}</p>
-                                            {d.pendingAmt>0&&<p className="text-[10px] text-orange-500">{fmtCur(d.pendingAmt)} pending</p>}
-                                        </div>
+
+                    {tab==='personal'&&(<div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">7 Hari Terakhir</p><p className="text-2xl font-black text-slate-700">{(my7Mins/60).toFixed(1)} <span className="text-sm font-normal text-slate-400">j</span></p><p className="text-xs font-medium mt-1" style={{color:theme.primary}}>{fmtC(my7Mins/60*rate)}</p></div>
+                            <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Pending</p><p className="text-xl font-black text-orange-600 mt-1">{fmtC(myPendMins/60*rate)}</p><p className="text-[10px] text-slate-400 mt-1">{(myPendMins/60).toFixed(1)}j belum dibayar</p><div className="mt-2 pt-2 border-t border-orange-100 flex items-center gap-1.5"><i className="fas fa-calendar-check text-orange-300 text-[9px]"></i><span className="text-[9px] text-orange-500">{pp.isPayday?'🎉 Hari ini hari bayar!':`Bayar Rabu ${fmtSh(pp.upcomingPayday)}`}</span></div></div>
+                        </div>
+                        {myPaidMins>0&&<div className="glass-strong rounded-2xl border border-white/50 p-4"><div className="flex justify-between items-center"><span className="text-xs font-bold text-slate-600">Total Dibayar (Sepanjang Waktu)</span><span className="text-sm font-black text-emerald-600">{fmtC(myPaidMins/60*rate)}</span></div><p className="text-[10px] text-slate-400 mt-1">{(myPaidMins/60).toFixed(1)}j · {myPaid.length} laporan</p></div>}
+                        {/* Discipline */}
+                        <div className="glass-strong rounded-2xl border border-white/50 p-5">
+                            <h3 className="font-bold text-slate-700 mb-1 text-sm"><i className="fas fa-chart-bar mr-1.5" style={{color:theme.primary}}></i>Disiplin Kerja</h3>
+                            <p className="text-[9px] text-slate-400 italic mb-4">Jadwal vs Aktual · 7 hari terakhir (PT)</p>
+                            <div className="space-y-5">
+                                {discipline.map((d,idx)=>{if(d.schedules.length===0&&d.unplanned.length===0)return null;return(
+                                    <div key={idx} className="border-l-2 border-slate-200 pl-3">
+                                        <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">{formatDateShort(d.date)} (PT)</p>
+                                        <div className="space-y-2">{d.schedules.map((s,si)=>{const diff=s.actualMins-s.planMins;const status=diff<-15?'Kurang':diff>30?'Lebih':s.actualMins===0?'Belum':'Tepat';const sColor=diff<-15?'bg-yellow-100 text-yellow-700':diff>30?'bg-red-100 text-red-700':s.actualMins===0?'bg-slate-100 text-slate-500':'bg-green-100 text-green-700';const bColor=diff<-15?'bg-yellow-500':diff>30?'bg-red-500':s.actualMins===0?'bg-slate-300':'bg-green-500';const bW=`${Math.min(100,(s.actualMins/s.planMins)*100||0)}%`;return(
+                                            <div key={si} className="bg-white rounded-xl p-3 border border-slate-100">
+                                                <div className="flex justify-between items-center mb-1.5"><span className="text-[10px] font-mono text-slate-500">{s.start}–{s.end}</span><span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${sColor}`}>{status}</span></div>
+                                                <div className="bg-slate-100 rounded-full h-2 overflow-hidden"><div className={`h-2 rounded-full transition-all ${bColor}`} style={{width:bW}}></div></div>
+                                                <div className="flex justify-between mt-1"><span className="text-[9px] text-slate-400">Rencana: {fmtDuration(Math.round(s.planMins))}</span><span className="text-[9px] font-bold text-slate-600">Aktual: {fmtDuration(s.actualMins)}</span></div>
+                                            </div>);})}
+                                        {d.unplanned.length>0&&<div className="text-[10px] text-amber-600 bg-amber-50 rounded-lg p-2 border border-amber-100"><i className="fas fa-exclamation-triangle mr-1"></i>{d.unplanned.length} kerja tanpa jadwal</div>}</div>
                                     </div>);})}
                             </div>
                         </div>
-                    )}
+                    </div>)}
+
+                    {tab==='team'&&canViewAll&&(<div className="space-y-4">
+                        <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Tim</p><p className="text-2xl font-black text-slate-700">{(teamMins/60).toFixed(1)} <span className="text-sm text-slate-400">j</span></p><p className="text-xs mt-1" style={{color:theme.primary}}>{fmtC(teamMins/60*rate)}</p></div>
+                        {/* Leaderboard */}
+                        <div className="glass-strong rounded-2xl border border-white/50 p-5">
+                            <h3 className="font-bold text-slate-700 mb-3 text-sm"><i className="fas fa-trophy text-amber-500 mr-1.5"></i>Papan Peringkat</h3>
+                            <div className="space-y-2">{leaderboard.map((l,i)=>(<div key={l.uid} className="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-slate-100"><span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${i===0?'bg-amber-100 text-amber-600':i===1?'bg-slate-200 text-slate-600':i===2?'bg-orange-100 text-orange-600':'bg-slate-100 text-slate-400'}`}>{i+1}</span><div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:l.color}}>{(l.displayName||'?').substring(0,2).toUpperCase()}</div><div className="flex-1"><p className="text-sm font-bold text-slate-700">{l.displayName}</p><p className="text-[10px] text-slate-400">{fmtDuration(l.mins)}</p></div><p className="text-xs font-black" style={{color:theme.primary}}>{fmtC(l.mins/60*rate)}</p></div>))}</div>
+                        </div>
+                        {/* Daily activity */}
+                        <div className="glass-strong rounded-2xl border border-white/50 p-5">
+                            <h3 className="font-bold text-slate-700 mb-3 text-sm"><i className="fas fa-chart-bar mr-1.5" style={{color:theme.primary}}></i>Aktivitas Harian (7 Hari)</h3>
+                            <div className="space-y-2">{dailyAct.reverse().map(d=>{const pct=maxDaily>0?d.mins/maxDaily*100:0;return(<div key={d.date} className="flex items-center gap-3"><span className="text-[10px] font-mono text-slate-400 w-12 flex-shrink-0">{d.date.slice(5)}</span><div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden"><div className="h-4 rounded-full transition-all" style={{width:`${pct}%`,background:`linear-gradient(90deg, ${theme.primary}, ${theme.primaryLight})`}}></div></div><span className="text-[10px] font-bold text-slate-600 w-10 text-right">{(d.mins/60).toFixed(1)}j</span></div>);})}</div>
+                        </div>
+                    </div>)}
                 </div>
             );
         };
 
-        /* ═══════════════════════════════════════════════
-           TENANT ADMIN VIEW — Full (matches v1 AdminPanel)
-           ═══════════════════════════════════════════════ */
-
-        /* ═══════════════════════════════════════════════
-           TENANT ADMIN VIEW — Full with user CRUD
-           ═══════════════════════════════════════════════ */
         const TenantAdminView = ({ users, timesheets, schedules, session, tenant, td, tz, theme, notify, sysSettings, hasPerm }) => {
             const [tab, setTab] = useState('pending');
             const [settingsForm, setSF] = useState({ dailyQuotaHours:10, baseHourlyRateUSD:15, usdToIdr:16000 });
