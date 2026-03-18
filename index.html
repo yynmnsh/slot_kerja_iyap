@@ -342,6 +342,48 @@
             return h > 0 ? (m > 0 ? `${h}j ${m}m` : `${h}j`) : `${m}m`;
         };
 
+        const getPSTDayFromEpoch = (epoch) => {
+            const d = new Date(epoch + TZ_CONFIG.PT.offsetUTC * 3600000);
+            return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+        };
+
+        const getPSTDay = (dbDateStr, dbTimeStr) => {
+            if (!dbDateStr || !dbTimeStr) return null;
+            return getPSTDayFromEpoch(getEpochFromWIB(dbDateStr, dbTimeStr));
+        };
+
+        const getPayPeriodInfo = () => {
+            const ptOff = TZ_CONFIG.PT.offsetUTC * 3600000;
+            const ptNow = new Date(Date.now() + ptOff);
+            const ptDow = ptNow.getUTCDay();
+            const daysUntilWed = ptDow === 3 ? 0 : (3 - ptDow + 7) % 7;
+            const isPayday = ptDow === 3;
+            const paydayEp = Date.now() + daysUntilWed * 86400000;
+            const pEndEp = paydayEp - 2 * 86400000;
+            const pStartEp = pEndEp - 6 * 86400000;
+            const nPaydayEp = paydayEp + (isPayday ? 7 : 0) * 86400000;
+            const nPEndEp = nPaydayEp - 2 * 86400000;
+            const nPStartEp = nPEndEp - 6 * 86400000;
+            const fmt = ep => { const d = new Date(ep + ptOff); return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`; };
+            return {
+                isPayday,
+                currentPeriodStart: fmt(isPayday ? nPStartEp : pStartEp),
+                currentPeriodEnd: fmt(isPayday ? nPEndEp : pEndEp),
+                upcomingPayday: fmt(isPayday ? nPaydayEp : paydayEp),
+                todayPeriodStart: isPayday ? fmt(pStartEp) : null,
+                todayPeriodEnd: isPayday ? fmt(pEndEp) : null,
+            };
+        };
+
+        const getPtCutoffInTz = (tzCode) => {
+            if (tzCode === 'PT') return { startStr:'00:00', endStr:'23:59', crossMidnight: false };
+            const diff = TZ_CONFIG[tzCode].offsetUTC - TZ_CONFIG.PT.offsetUTC;
+            const startH = ((diff % 24) + 24) % 24;
+            const endH = ((startH - 1) % 24 + 24) % 24;
+            const pad = n => String(n).padStart(2,'0');
+            return { startStr:`${pad(startH)}:00`, endStr:`${pad(endH)}:59`, crossMidnight: startH > 0 };
+        };
+
         /* ═══════════════════════════════════════════════
            NOTIFICATION
            ═══════════════════════════════════════════════ */
@@ -995,313 +1037,402 @@
             );
         };
 
+
         /* ═══════════════════════════════════════════════
-           SCHEDULE VIEW
+           SCHEDULE VIEW — matches v1 ScheduleManager
            ═══════════════════════════════════════════════ */
-        const ScheduleView = ({ schedules, users, session, tenant, td, tz, theme, hasPerm, notify }) => {
-            const [selDate, setSelDate] = useState(getToday());
-            const [showForm, setShowForm] = useState(false);
+        const ScheduleView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings }) => {
+            const [showHistory, setShowHistory] = useState(false);
+            const [filterMine, setFilterMine] = useState(false);
+            const [sortOrder, setSortOrder] = useState('asc');
+            const [form, setForm] = useState({ startDate:'', startTime:'14:00', endDate:'', endTime:'15:00' });
             const [editId, setEditId] = useState(null);
-            const [form, setForm] = useState({ date:'', startTime:'', endTime:'', notes:'' });
             const [busy, setBusy] = useState(false);
             const [cfm, setCfm] = useState({ show:false });
-            const [viewMode, setViewMode] = useState('day'); // day | week
+            const [bookCfm, setBookCfm] = useState({ show:false, action:null });
 
             const canCreate = hasPerm('schedule.create');
             const canViewAll = hasPerm('schedule.view_all');
-            const canEditAll = hasPerm('schedule.edit_all');
-            const canDeleteAll = hasPerm('schedule.delete_all');
             const canEditOwn = hasPerm('schedule.edit_own');
-            const canDeleteOwn = hasPerm('schedule.delete_own');
-
+            const canEditAll = hasPerm('schedule.edit_all');
+            const canDelOwn = hasPerm('schedule.delete_own');
+            const canDelAll = hasPerm('schedule.delete_all');
             const canEdit = (s) => canEditAll || (canEditOwn && s.userId === session.id);
-            const canDelete = (s) => canDeleteAll || (canDeleteOwn && s.userId === session.id);
+            const canDel = (s) => canDelAll || (canDelOwn && s.userId === session.id);
+            const getU = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
 
-            // Filter schedules: convert DB (WIB) dates to display timezone dates for matching
-            const getDisplaySchedules = () => {
-                const relevant = canViewAll ? schedules : schedules.filter(s => s.userId === session.id);
-                return relevant.map(s => {
-                    const ds = toDisplayTime(s.startTime, s.date, tz);
-                    const de = toDisplayTime(s.endTime, s.date, tz);
-                    return { ...s, dispDate: ds.date, dispStart: ds.time, dispEnd: de.time };
+            // ── PT day nav for timeline ──
+            const todayPt = useMemo(() => getPSTDayFromEpoch(Date.now()), []);
+            const [mapPt, setMapPt] = useState(() => todayPt);
+            const shiftMap = (d) => setMapPt(p => addDays(p, d));
+
+            useEffect(() => {
+                if (form.startDate && form.startTime) {
+                    const db = toDbTime(form.startTime, form.startDate, tz);
+                    const pt = getPSTDayFromEpoch(getEpochFromWIB(db.date, db.time));
+                    if (pt) setMapPt(pt);
+                }
+            }, [form.startDate, form.startTime, tz]);
+
+            // ── Quota ──
+            const MAX_M = (sysSettings?.dailyQuotaHours || 10) * 60;
+            const targetPt = useMemo(() => {
+                if (form.startDate && form.startTime) {
+                    const db = toDbTime(form.startTime, form.startDate, tz);
+                    return getPSTDayFromEpoch(getEpochFromWIB(db.date, db.time));
+                }
+                return todayPt;
+            }, [form.startDate, form.startTime, tz, todayPt]);
+
+            const usedM = useMemo(() => {
+                if (!targetPt) return 0;
+                return schedules.filter(s => editId !== s.id && getPSTDay(s.startDate||s.date, s.startTime) === targetPt).reduce((a, s) => {
+                    const sE = getEpochFromWIB(s.startDate||s.date, s.startTime);
+                    let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
+                    if (!s.endDate && eE <= sE) eE += 86400000;
+                    return a + Math.floor((eE - sE) / 60000);
+                }, 0);
+            }, [schedules, targetPt, editId]);
+
+            const remainM = MAX_M - usedM;
+            const isOver = usedM > MAX_M;
+            const usedPct = Math.min(100, usedM / MAX_M * 100);
+            const isCrit = remainM < 60;
+
+            const newDur = useMemo(() => {
+                if (!form.startDate || !form.startTime || !form.endDate || !form.endTime) return 0;
+                const dbS = toDbTime(form.startTime, form.startDate, tz);
+                const dbE = toDbTime(form.endTime, form.endDate, tz);
+                return Math.max(0, Math.floor((getEpochFromWIB(dbE.date, dbE.time) - getEpochFromWIB(dbS.date, dbS.time)) / 60000));
+            }, [form, tz]);
+            const wouldExceed = newDur > 0 && (usedM + newDur > MAX_M);
+            const isDirty = form.startDate !== '' || form.startTime !== '14:00' || form.endDate !== '' || form.endTime !== '15:00';
+
+            // ── Filtered list ──
+            const filtered = useMemo(() => {
+                let ls = canViewAll ? [...schedules] : schedules.filter(s => s.userId === session.id);
+                if (!showHistory) { const now = Date.now(); ls = ls.filter(s => { let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= getEpochFromWIB(s.startDate||s.date, s.startTime)) eE += 86400000; return eE > now; }); }
+                if (filterMine) ls = ls.filter(s => s.userId === session.id);
+                ls.sort((a,b) => sortOrder==='asc' ? getEpochFromWIB(a.startDate||a.date, a.startTime) - getEpochFromWIB(b.startDate||b.date, b.startTime) : getEpochFromWIB(b.startDate||b.date, b.startTime) - getEpochFromWIB(a.startDate||a.date, a.startTime));
+                return ls;
+            }, [schedules, showHistory, filterMine, sortOrder, session.id, canViewAll]);
+
+            // ── Timeline blocks ──
+            const tlBlocks = useMemo(() => {
+                const bl = [];
+                schedules.forEach(s => {
+                    if (editId && s.id === editId) return;
+                    if (getPSTDay(s.startDate||s.date, s.startTime) !== mapPt) return;
+                    const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz);
+                    const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
+                    const sM = parseInt(uS.time.split(':')[0])*60 + parseInt(uS.time.split(':')[1]);
+                    const eM = parseInt(uE.time.split(':')[0])*60 + parseInt(uE.time.split(':')[1]);
+                    if (uS.date === uE.date && eM > sM) bl.push({...s, sp:sM/1440*100, wp:(eM-sM)/1440*100, uS, uE});
+                    else if (uS.date < uE.date) bl.push({...s, sp:sM/1440*100, wp:(1440-sM)/1440*100, uS, uE});
                 });
+                return bl;
+            }, [schedules, mapPt, editId, tz]);
+
+            const prevBlock = useMemo(() => {
+                if (!form.startDate || !form.startTime || !form.endTime) return null;
+                const sM = parseInt(form.startTime.split(':')[0])*60 + parseInt(form.startTime.split(':')[1]);
+                let eM = parseInt(form.endTime.split(':')[0])*60 + parseInt(form.endTime.split(':')[1]);
+                if (form.endDate > form.startDate) eM = 1440;
+                else if (eM < sM && !form.endDate) eM = 1440;
+                if (eM <= sM) return null;
+                return { sp: sM/1440*100, wp: (eM-sM)/1440*100 };
+            }, [form]);
+
+            const startEdit = (s) => {
+                const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz);
+                const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
+                setForm({ startDate:uS.date, startTime:uS.time, endDate:uE.date, endTime:uE.time });
+                setEditId(s.id); window.scrollTo({top:0,behavior:'smooth'});
+            };
+            const resetForm = () => { setForm({ startDate:'', startTime:'14:00', endDate:'', endTime:'15:00' }); setEditId(null); };
+
+            // ── Save ──
+            const save = async (e) => {
+                e.preventDefault();
+                if (!form.startDate || !form.startTime || !form.endDate || !form.endTime) { notify('Semua kolom tanggal & waktu wajib diisi','error'); return; }
+                const stStr = `${form.startDate}T${form.startTime}`, enStr = `${form.endDate}T${form.endTime}`;
+                if (enStr <= stStr) { notify('Waktu selesai harus setelah waktu mulai','error'); return; }
+                const dbS = toDbTime(form.startTime, form.startDate, tz), dbE = toDbTime(form.endTime, form.endDate, tz);
+                const nSE = getEpochFromWIB(dbS.date, dbS.time), nEE = getEpochFromWIB(dbE.date, dbE.time);
+                // Past check
+                if (!editId) {
+                    const nw = new Date(Date.now() + TZ_CONFIG[tz].offsetUTC * 3600000);
+                    const nwStr = `${nw.getUTCFullYear()}-${String(nw.getUTCMonth()+1).padStart(2,'0')}-${String(nw.getUTCDate()).padStart(2,'0')}T${String(nw.getUTCHours()).padStart(2,'0')}:${String(nw.getUTCMinutes()).padStart(2,'0')}`;
+                    if (stStr < nwStr && (new Date(nwStr) - new Date(stStr)) > 60000) { notify('Tidak bisa membuat jadwal di waktu lampau','error'); return; }
+                }
+                // Conflict
+                let conflictU = null;
+                if (schedules.some(s => { if (editId && s.id === editId) return false; const eS = getEpochFromWIB(s.startDate||s.date, s.startTime); let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= eS) eE += 86400000; if (nSE < eE && nEE > eS) { conflictU = getU(s.userId).displayName; return true; } return false; })) { notify(`Jadwal bertabrakan dengan ${conflictU}!`,'error'); return; }
+                // Quota
+                const ptD = getPSTDayFromEpoch(nSE);
+                const exM = schedules.reduce((a, s) => { if (editId && s.id === editId) return a; if (getPSTDay(s.startDate||s.date, s.startTime) !== ptD) return a; const sE = getEpochFromWIB(s.startDate||s.date, s.startTime); let eE = getEpochFromWIB(s.endDate||s.date, s.endTime); if (!s.endDate && eE <= sE) eE += 86400000; return a + Math.floor((eE - sE) / 60000); }, 0);
+                const dur = Math.floor((nEE - nSE) / 60000);
+                if (exM + dur > MAX_M) { const ov = exM + dur - MAX_M; notify(`Kuota PT terlampaui! Sisa ${MAX_M-exM} mnt, jadwal ini ${dur} mnt (lebih ${ov} mnt).`,'error'); return; }
+                // Confirm
+                setBookCfm({ show:true, action: async () => {
+                    setBookCfm({show:false,action:null}); setBusy(true);
+                    try {
+                        const col = `tenants/${tenant.id}/schedules`;
+                        const pl = { userId: editId ? (schedules.find(s=>s.id===editId)?.userId||session.id) : session.id, startDate:dbS.date, startTime:dbS.time, endDate:dbE.date, endTime:dbE.time, updatedAt:new Date().toISOString() };
+                        if (editId) { await window.fs.updateDoc(window.fs.doc(window.db, col, editId), pl); notify('Jadwal diperbarui','success'); }
+                        else { pl.createdAt = new Date().toISOString(); await window.fs.addDoc(window.fs.collection(window.db, col), pl); notify('Jadwal dibuat','success'); }
+                        resetForm();
+                    } catch(e) { notify('Gagal: '+e.message,'error'); } setBusy(false);
+                }});
             };
 
-            const displaySchedules = getDisplaySchedules();
-
-            // Day view
-            const daySchedules = displaySchedules.filter(s => s.dispDate === selDate).sort((a,b) => a.dispStart.localeCompare(b.dispStart));
-
-            // Week view - get 7 days starting from selected Monday
-            const getWeekStart = (d) => {
-                const [y,m,dd] = d.split('-').map(Number);
-                const dt = new Date(y,m-1,dd);
-                const dow = dt.getDay(); // 0=Sun
-                const mondayOffset = dow === 0 ? -6 : 1 - dow;
-                return addDays(d, mondayOffset);
-            };
-            const weekStart = getWeekStart(selDate);
-            const weekDays = Array.from({length:7},(_,i)=>addDays(weekStart,i));
-
-            const getUserInfo = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
-
-            // Form open
-            const openCreate = () => {
-                setEditId(null);
-                setForm({ date: selDate, startTime: '09:00', endTime: '17:00', notes: '' });
-                setShowForm(true);
+            const del = (id) => {
+                if ((timesheets||[]).some(ts => ts.scheduleId === id)) { notify('Tidak bisa hapus — ada laporan terkait','error'); return; }
+                setCfm({show:true, title:'Hapus Jadwal?', msg:'Jadwal ini akan dihapus permanen.', danger:true, onOk: async ()=>{ setCfm({show:false}); try { await window.fs.deleteDoc(window.fs.doc(window.db, `tenants/${tenant.id}/schedules`, id)); notify('Jadwal dihapus','success'); } catch(e) { notify('Gagal: '+e.message,'error'); }}});
             };
 
-            const openEdit = (s) => {
-                setEditId(s.id);
-                const ds = toDisplayTime(s.startTime, s.date, tz);
-                const de = toDisplayTime(s.endTime, s.date, tz);
-                setForm({ date: ds.date, startTime: ds.time, endTime: de.time, notes: s.notes || '' });
-                setShowForm(true);
-            };
-
-            // Save
-            const saveSchedule = async () => {
-                if (!form.date || !form.startTime || !form.endTime) { notify('Tanggal dan waktu wajib diisi','error'); return; }
-                if (form.startTime >= form.endTime) { notify('Waktu selesai harus setelah waktu mulai','error'); return; }
-                setBusy(true);
-                try {
-                    // Convert from display tz to WIB for storage
-                    const dbStart = toDbTime(form.startTime, form.date, tz);
-                    const dbEnd = toDbTime(form.endTime, form.date, tz);
-                    const data = {
-                        userId: editId ? (schedules.find(s=>s.id===editId)?.userId || session.id) : session.id,
-                        date: dbStart.date,
-                        startTime: dbStart.time,
-                        endTime: dbEnd.time,
-                        notes: form.notes.trim(),
-                        updatedAt: new Date().toISOString(),
-                    };
-                    const colPath = `tenants/${tenant.id}/schedules`;
-                    if (editId) {
-                        await window.fs.updateDoc(window.fs.doc(window.db, colPath, editId), data);
-                        notify('Jadwal diperbarui','success');
-                    } else {
-                        data.createdAt = new Date().toISOString();
-                        await window.fs.addDoc(window.fs.collection(window.db, colPath), data);
-                        notify('Jadwal ditambahkan','success');
-                    }
-                    setShowForm(false); setEditId(null);
-                } catch(e) { notify('Gagal menyimpan: '+e.message,'error'); }
-                setBusy(false);
-            };
-
-            // Delete
-            const deleteSchedule = async (id) => {
-                try {
-                    await window.fs.deleteDoc(window.fs.doc(window.db, `tenants/${tenant.id}/schedules`, id));
-                    notify('Jadwal dihapus','success');
-                } catch(e) { notify('Gagal menghapus: '+e.message,'error'); }
-            };
-
-            // Navigation
-            const navDate = (n) => setSelDate(viewMode === 'week' ? addDays(selDate, n*7) : addDays(selDate, n));
-            const goToday = () => setSelDate(getToday());
-            const isToday = selDate === getToday();
-
-            // Schedule card
-            const SchCard = ({ s }) => {
-                const u = getUserInfo(s.userId);
-                const dur = calcDurationMins(s.dispStart, s.dispEnd);
-                const isMine = s.userId === session.id;
-                return (
-                    <div className={`glass-strong rounded-2xl border p-4 card-lift transition-all ${isMine ? 'border-l-4' : 'border-white/50'}`} style={isMine ? {borderLeftColor: theme.primary} : {}}>
-                        <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{background:u.color||'#94a3b8'}}>
-                                    {(u.displayName||'?')[0].toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-bold text-sm text-slate-800 truncate">{u.displayName}</span>
-                                        {isMine && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{background:theme.primary50, color:theme.primary}}>Saya</span>}
-                                    </div>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <span className="text-sm font-mono font-bold" style={{color:theme.primary}}>{s.dispStart}</span>
-                                        <span className="text-slate-300">→</span>
-                                        <span className="text-sm font-mono font-bold text-slate-600">{s.dispEnd}</span>
-                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{fmtDuration(dur)}</span>
-                                    </div>
-                                    {s.notes && <p className="text-xs text-slate-400 mt-1 truncate">{s.notes}</p>}
-                                </div>
-                            </div>
-                            {(canEdit(s) || canDelete(s)) && (
-                                <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
-                                    {canEdit(s) && <button onClick={()=>openEdit(s)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-pen text-[10px]"></i></button>}
-                                    {canDelete(s) && <button onClick={()=>setCfm({show:true,title:'Hapus Jadwal?',msg:'Jadwal ini akan dihapus permanen.',danger:true,onOk:()=>{deleteSchedule(s.id);setCfm({show:false})}})} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all"><i className="fas fa-trash-alt text-[10px]"></i></button>}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                );
-            };
+            // Map day summary
+            const mdSch = schedules.filter(s => getPSTDay(s.startDate||s.date, s.startTime) === mapPt);
+            const mdMins = mdSch.reduce((a,s)=>{const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.floor((eE-sE)/60000);},0);
+            const mdPct = Math.min(100, MAX_M>0?mdMins/MAX_M*100:0);
+            const mdOver = mdMins > MAX_M;
 
             return (
                 <div className="space-y-4 animate-fade-in">
-                    {/* Header bar */}
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-bold text-slate-800"><i className="fas fa-calendar-alt mr-2" style={{color:theme.primary}}></i>Jadwal</h2>
-                        <div className="flex items-center gap-2">
-                            {/* View mode toggle */}
-                            <div className="flex gap-0.5 p-0.5 rounded-lg bg-slate-100/80">
-                                {[{id:'day',l:'Hari'},{id:'week',l:'Minggu'}].map(m=>(
-                                    <button key={m.id} onClick={()=>setViewMode(m.id)} className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all ${viewMode===m.id?'bg-white shadow-sm text-slate-800':'text-slate-400 hover:text-slate-600'}`}>{m.l}</button>
-                                ))}
-                            </div>
-                            {canCreate && (
-                                <button onClick={openCreate} className="btn-primary px-3.5 py-2 rounded-xl text-xs font-bold">
-                                    <i className="fas fa-plus mr-1.5"></i>Tambah
-                                </button>
-                            )}
+                    {/* ═══ FORM CARD ═══ */}
+                    {canCreate && (
+                    <div className={`glass-strong rounded-2xl border-t-4 overflow-hidden ${editId?'border-orange-400':''}`} style={editId?{}:{borderTopColor:theme.primary}}>
+                        <div className="px-5 pt-4 pb-3 border-b border-slate-100/80 flex justify-between items-center">
+                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-blue-100'}`}><i className={`fas ${editId?'fa-pen':'fa-calendar-plus'} text-xs ${editId?'text-orange-600':'text-blue-600'}`}></i></span>
+                                {editId ? 'Edit Jadwal' : 'Booking Jadwal'}
+                            </h3>
+                            {(editId || isDirty) && <button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}
                         </div>
-                    </div>
-
-                    {/* Date navigator */}
-                    <div className="glass-strong rounded-2xl border border-white/50 p-3 flex items-center justify-between">
-                        <button onClick={()=>navDate(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-chevron-left text-sm"></i></button>
-                        <div className="text-center flex-1">
-                            {viewMode === 'day' ? (
-                                <>
-                                    <p className="text-sm font-bold text-slate-800">{formatDateId(selDate)}</p>
-                                    <p className="text-[10px] text-slate-400 font-medium">{daySchedules.length} jadwal · {TZ_CONFIG[tz]?.short||tz}</p>
-                                </>
-                            ) : (
-                                <>
-                                    <p className="text-sm font-bold text-slate-800">{formatDateShort(weekStart)} — {formatDateShort(addDays(weekStart,6))}</p>
-                                    <p className="text-[10px] text-slate-400 font-medium">{displaySchedules.filter(s=>weekDays.includes(s.dispDate)).length} jadwal minggu ini</p>
-                                </>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-1">
-                            {!isToday && <button onClick={goToday} className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-all" style={{color:theme.primary}}>Hari Ini</button>}
-                            <button onClick={()=>navDate(1)} className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-chevron-right text-sm"></i></button>
-                        </div>
-                    </div>
-
-                    {/* Day View */}
-                    {viewMode === 'day' && (
-                        <>
-                            {daySchedules.length === 0 ? (
-                                <div className="glass-strong rounded-2xl border border-white/50 p-10 text-center">
-                                    <div className="text-4xl mb-3">📭</div>
-                                    <p className="text-sm font-semibold text-slate-500">Tidak ada jadwal</p>
-                                    <p className="text-xs text-slate-400 mt-1">{formatDateShort(selDate)}</p>
-                                    {canCreate && <button onClick={openCreate} className="mt-4 text-xs font-bold px-4 py-2 rounded-xl transition-all hover:shadow" style={{color:theme.primary, background:theme.primary50}}>
-                                        <i className="fas fa-plus mr-1.5"></i>Buat Jadwal
-                                    </button>}
-                                </div>
-                            ) : (
-                                <div className="space-y-2.5 stagger">
-                                    {daySchedules.map(s => <SchCard key={s.id} s={s} />)}
-                                </div>
-                            )}
-                            {/* Daily summary */}
-                            {daySchedules.length > 0 && (
-                                <div className="glass-strong rounded-2xl border border-white/50 p-4">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs font-semibold text-slate-500">Total jam terjadwal</span>
-                                        <span className="text-sm font-bold" style={{color:theme.primary}}>
-                                            {fmtDuration(daySchedules.reduce((acc,s) => acc + calcDurationMins(s.dispStart, s.dispEnd), 0))}
+                        <div className="p-5 space-y-4">
+                            {/* Quota */}
+                            <div className={`rounded-2xl border overflow-hidden ${isOver?'border-red-200 bg-red-50':isCrit?'border-orange-100 bg-orange-50/60':'border-slate-100 bg-white'}`}>
+                                <div className="px-4 pt-3 pb-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${isOver?'bg-red-100':isCrit?'bg-orange-100':'bg-blue-100'}`}><i className={`fas fa-bolt text-[10px] ${isOver?'text-red-500':isCrit?'text-orange-500':'text-blue-500'}`}></i></div>
+                                            <span className={`text-xs font-bold ${isOver?'text-red-700':isCrit?'text-orange-700':'text-slate-700'}`}>Kuota Tim Harian</span>
+                                        </div>
+                                        <span className="text-slate-400 text-[9px] font-mono font-semibold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">{formatDateShort(targetPt)} PT</span>
+                                    </div>
+                                    <div className="flex items-baseline gap-1.5 mb-2">
+                                        <span className={`text-2xl font-black ${isOver?'text-red-600':isCrit?'text-orange-600':'text-slate-800'}`}>{(usedM/60).toFixed(1)}</span>
+                                        <span className="text-slate-400 text-sm">/ {sysSettings?.dailyQuotaHours||10}j</span>
+                                        <span className={`ml-auto text-[10px] font-bold ${isOver?'text-red-500':isCrit?'text-orange-500':remainM>0?'text-blue-500':'text-slate-400'}`}>
+                                            {isOver?`+${((usedM-MAX_M)/60).toFixed(1)}j Melebihi!`:remainM>0?`${(Math.max(0,remainM)/60).toFixed(1)}j Tersisa`:'Kuota penuh'}
                                         </span>
                                     </div>
-                                    <div className="flex items-center justify-between mt-1">
-                                        <span className="text-xs font-semibold text-slate-500">Jumlah orang</span>
-                                        <span className="text-sm font-bold text-slate-700">{new Set(daySchedules.map(s=>s.userId)).size}</span>
+                                    <div className="w-full bg-slate-100 rounded-full h-1.5"><div className={`h-1.5 rounded-full transition-all duration-700 ${isOver?'bg-red-400':isCrit?'bg-orange-400':'bg-blue-500'}`} style={{width:`${usedPct}%`}}/></div>
+                                    {tz!=='PT'&&(()=>{const co=getPtCutoffInTz(tz);return<p className="text-[9px] text-slate-400 mt-1.5"><i className="fas fa-clock text-[8px] opacity-40 mr-1"></i>Jendela PT: {co.startStr}–{co.endStr} {TZ_CONFIG[tz]?.short}{co.crossMidnight?' (esok)':''}</p>;})()}
+                                </div>
+                            </div>
+                            {/* Timeline */}
+                            <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                                <div className="px-4 py-3" style={{background:`linear-gradient(135deg, ${theme.primaryDark}, ${theme.primary})`}}>
+                                    <div className="flex items-center justify-between">
+                                        <div><h4 className="text-white font-bold text-sm flex items-center gap-2"><i className="fas fa-chart-gantt"></i>Peta Visual</h4><p className="text-white/60 text-[10px] mt-0.5">Semua pengguna · Zona waktu lokal</p></div>
+                                        <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1">
+                                            <button onClick={()=>shiftMap(-1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-left"></i></button>
+                                            <button onClick={()=>setMapPt(todayPt)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[60px] text-center ${mapPt===todayPt?'bg-white shadow-sm':'text-white hover:bg-white/20'}`} style={mapPt===todayPt?{color:theme.primary}:{}}>{mapPt===todayPt?'Hari Ini':formatDateShort(mapPt)}</button>
+                                            <button onClick={()=>shiftMap(1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-right"></i></button>
+                                        </div>
+                                    </div>
+                                    <div className="mt-2 flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5"><i className="fas fa-clock text-white/40 text-[9px]"></i><span className="text-white/60 text-[9px]">Hari kerja = 00:00–23:59 PT (Pacific Time).</span></div>
+                                </div>
+                                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-1">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[9px] font-bold uppercase tracking-wide" style={{color:theme.primary}}><i className="fas fa-clock text-[8px] mr-1"></i>PT: {mapPt}</span>
+                                        <span className={`text-[10px] font-bold ${mdOver?'text-red-500':mdMins>0?'':'text-slate-400'}`} style={!mdOver&&mdMins>0?{color:theme.primary}:{}}>{mdSch.length} jadwal · {(mdMins/60).toFixed(1)}/{sysSettings?.dailyQuotaHours||10}j{mdOver?' (Melebihi!)':''}</span>
+                                    </div>
+                                    <div className="bg-slate-200 rounded-full h-1"><div className={`h-1 rounded-full transition-all ${mdOver?'bg-red-400':mdMins>0?'bg-blue-400':'bg-slate-300'}`} style={{width:`${mdPct}%`}}/></div>
+                                </div>
+                                <div className="p-3">
+                                    <div className="relative w-full h-20 bg-white border border-slate-200 rounded-lg overflow-visible shadow-sm">
+                                        <div className="absolute top-0 left-0 right-0 h-4 border-b border-slate-100 flex justify-between bg-slate-50 rounded-t-lg">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full flex flex-col justify-center relative opacity-60 w-0"><span className={`text-[7px] text-slate-500 font-bold absolute ${h===0?'left-1':h===24?'right-1':'left-1/2 -translate-x-1/2'}`}>{String(h).padStart(2,'0')}:00</span></div>)}</div>
+                                        <div className="absolute inset-y-4 left-0 right-0 flex justify-between pointer-events-none">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full border-l border-slate-200 border-dashed w-0"></div>)}</div>
+                                        <div className="absolute top-4 bottom-0 left-0 right-0 z-10">
+                                            {tlBlocks.map((b,i)=>{const u=getU(b.userId);const dm=Math.round(b.wp/100*1440);return(
+                                                <div key={b.id||i} className="absolute h-full top-0 group cursor-pointer border-l-2 hover:z-30 hover:-translate-y-1 transition-all" style={{left:`${b.sp}%`,width:`${b.wp}%`,borderColor:u.color,backgroundColor:`${u.color}15`}}>
+                                                    <div className="w-full h-1" style={{backgroundColor:u.color}}></div>
+                                                    <div className={`hidden group-hover:flex absolute ${b.sp>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-800 text-white text-[10px] p-2 rounded-lg shadow-xl whitespace-nowrap flex-col gap-1 z-50 border border-slate-700`}>
+                                                        <div className="flex items-center gap-1.5 border-b border-slate-600 pb-1"><div className="w-2 h-2 rounded-full" style={{backgroundColor:u.color}}></div><span className="font-bold">{u.displayName}</span></div>
+                                                        <span className="text-slate-300 font-mono"><i className="far fa-clock mr-1"></i>{b.uS.time} – {b.uE.time}</span>
+                                                        <span className="text-slate-400 text-[9px]"><i className="fas fa-stopwatch mr-1"></i>{fmtDuration(dm)}</span>
+                                                    </div>
+                                                </div>);
+                                            })}
+                                            {prevBlock&&<div className="absolute h-full top-0 border-x-2 border-dashed z-20 pointer-events-none flex items-center justify-center" style={{left:`${prevBlock.sp}%`,width:`${prevBlock.wp}%`,borderColor:theme.primary,backgroundColor:`${theme.primary}08`}}><div className="text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{backgroundColor:theme.primary,opacity:0.8}}>Baru</div></div>}
+                                            {getPSTDayFromEpoch(Date.now())===mapPt&&(()=>{const no=new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000);const nm=no.getUTCHours()*60+no.getUTCMinutes();return<div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{left:`${nm/1440*100}%`}}><div className="absolute top-0 bottom-0 w-0.5 bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div><div className="absolute -top-0.5 w-2.5 h-2.5 bg-red-500 rounded-full shadow" style={{left:'50%',transform:'translateX(-50%)'}}></div></div>;})()}
+                                        </div>
                                     </div>
                                 </div>
-                            )}
-                        </>
-                    )}
+                            </div>
+                            {/* Form inputs */}
+                            <form onSubmit={save} className="space-y-3" noValidate>
+                                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100">
+                                    <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-play-circle text-blue-500 text-sm"></i>Mulai <span className="text-slate-300 normal-case">({TZ_CONFIG[tz]?.short})</span></label></div>
+                                    <input type="date" required value={form.startDate} onChange={e=>{if(!form.endDate)setForm({...form,startDate:e.target.value,endDate:e.target.value});else setForm({...form,startDate:e.target.value});}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" />
+                                    <input type="time" required value={form.startTime} onChange={e=>setForm({...form,startTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100">
+                                    <div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-stop-circle text-red-500 text-sm"></i>Selesai <span className="text-slate-300 normal-case">({TZ_CONFIG[tz]?.short})</span></label></div>
+                                    <input type="date" required value={form.endDate} onChange={e=>setForm({...form,endDate:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" />
+                                    <input type="time" required value={form.endTime} onChange={e=>setForm({...form,endTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" />
+                                </div>
+                                {newDur>0&&<div className="text-center"><span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:theme.primary50,color:theme.primary}}><i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(newDur)}</span></div>}
+                                <button disabled={busy||wouldExceed||(!editId&&(remainM<=0||isOver))} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${wouldExceed||(!editId&&(remainM<=0||isOver))?'bg-red-500 shadow-red-200':editId?'bg-orange-500 hover:bg-orange-600 shadow-orange-200':'shadow-blue-200 btn-primary'}`}>
+                                    {busy?<i className="fas fa-spinner fa-spin"></i>:wouldExceed?<><i className="fas fa-exclamation-triangle text-xs"></i>Kuota Terlampaui!</>:(!editId&&(remainM<=0||isOver))?<><i className="fas fa-ban text-xs"></i>Kuota Penuh</>:editId?<><i className="fas fa-check text-xs"></i>Simpan</>:<><i className="fas fa-calendar-plus text-xs"></i>Booking</>}
+                                </button>
+                            </form>
+                        </div>
+                    </div>)}
 
-                    {/* Week View */}
-                    {viewMode === 'week' && (
-                        <div className="space-y-2">
-                            {weekDays.map(day => {
-                                const daySch = displaySchedules.filter(s=>s.dispDate===day).sort((a,b)=>a.dispStart.localeCompare(b.dispStart));
-                                const isT = day === getToday();
+                    {/* ═══ LIST ═══ */}
+                    <div className="space-y-3 pb-20">
+                        <div className="glass-strong rounded-2xl border border-white/50 p-3 space-y-2">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wide">{showHistory?'Semua Jadwal':'Jadwal Mendatang'}</h3>
+                                <button onClick={()=>setSortOrder(p=>p==='asc'?'desc':'asc')} className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition"><i className={`fas fa-sort-amount-${sortOrder==='asc'?'down-alt':'up'} text-xs`}></i></button>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={()=>{setShowHistory(!showHistory);setSortOrder(!showHistory?'desc':'asc');}} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${showHistory?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={showHistory?{background:theme.primaryDark,borderColor:theme.primaryDark}:{}}>{showHistory?'Tampilkan Mendatang':'Tampilkan Semua'}</button>
+                                <button onClick={()=>setFilterMine(!filterMine)} className={`flex-1 text-[10px] py-1.5 rounded-lg border font-semibold transition ${filterMine?'text-white':'bg-white text-slate-500 border-slate-200'}`} style={filterMine?{background:theme.primary,borderColor:theme.primary}:{}}>{filterMine?'Hanya Saya':'Semua Pengguna'}</button>
+                            </div>
+                        </div>
+                        {filtered.length===0&&<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><div className="text-4xl mb-3">📭</div><p className="text-sm font-semibold text-slate-500">Tidak ada jadwal</p></div>}
+                        {filtered.map((s,idx)=>{const isMine=s.userId===session.id;const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);const u=getU(s.userId);const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;const dm=Math.round((eE-sE)/60000);return(
+                            <div key={s.id} className={`glass-strong p-4 rounded-2xl border flex justify-between items-center card-lift ${isMine?'border-l-4':'border-white/50'}`} style={isMine?{borderLeftColor:theme.primary}:{}}>
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="w-2 h-10 rounded-full flex-shrink-0" style={{backgroundColor:u.color}}></div>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2"><span className="font-bold text-slate-700 text-sm">{u.displayName}</span>{isMine&&<span className="text-[10px] font-bold px-1.5 rounded" style={{background:theme.primary50,color:theme.primary}}>Saya</span>}</div>
+                                        <div className="text-xs text-slate-500 mt-1">{formatDateShort(sO.date)} · {sO.time} – {eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>
+                                        {dm>0&&<span className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><i className="far fa-clock text-[9px]"></i>{fmtDuration(dm)}</span>}
+                                    </div>
+                                </div>
+                                {(canEdit(s)||canDel(s))&&<div className="flex gap-1.5 flex-shrink-0 ml-2">
+                                    {canEdit(s)&&<button onClick={()=>startEdit(s)} className="w-8 h-8 rounded-full bg-white border border-blue-100 text-blue-500 hover:bg-blue-50 flex items-center justify-center transition"><i className="fas fa-pen text-xs"></i></button>}
+                                    {canDel(s)&&<button onClick={()=>del(s.id)} className="w-8 h-8 rounded-full bg-white border border-red-100 text-red-500 hover:bg-red-50 flex items-center justify-center transition"><i className="fas fa-trash text-xs"></i></button>}
+                                </div>}
+                            </div>);})}
+                    </div>
+                    <Confirm show={bookCfm.show} title="Konfirmasi Booking" msg="Pastikan data jadwal sudah benar. Lanjutkan?" onOk={bookCfm.action} onNo={()=>setBookCfm({show:false,action:null})} />
+                    <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
+                </div>
+            );
+        };
+
+        /* ═══════════════════════════════════════════════
+           DASHBOARD VIEW — matches v1 DashboardView
+           ═══════════════════════════════════════════════ */
+        const DashboardView = ({ session, td, users, schedules, timesheets, tz, theme, hasPerm, sysSettings }) => {
+            const pp = getPayPeriodInfo();
+            const activeUsers = users.filter(u => u.isActive);
+            const currentEpoch = Date.now();
+            const getU = (uid) => users.find(u=>u.id===uid) || { displayName:'?', color:'#94a3b8' };
+
+            // Who's working now
+            const activeWorkers = schedules.filter(s => {
+                const sE = getEpochFromWIB(s.startDate||s.date, s.startTime);
+                let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
+                if (!s.endDate && eE <= sE) eE += 86400000;
+                return currentEpoch >= sE && currentEpoch <= eE;
+            }).map(s => { const u = getU(s.userId); return { name:u.displayName, color:u.color, endTime:s.endTime, endDate:s.endDate||s.date, isActive:u.isActive }; }).filter(w => w.isActive !== false);
+
+            // Current time display
+            const nowTz = new Date(currentEpoch + TZ_CONFIG[tz].offsetUTC * 3600000);
+            const timeDisp = `${String(nowTz.getUTCHours()).padStart(2,'0')}:${String(nowTz.getUTCMinutes()).padStart(2,'0')}`;
+
+            // Upcoming schedules (next 5)
+            const upcoming = schedules.filter(s => {
+                let eE = getEpochFromWIB(s.endDate||s.date, s.endTime);
+                if (!s.endDate && eE <= getEpochFromWIB(s.startDate||s.date, s.startTime)) eE += 86400000;
+                return eE > currentEpoch;
+            }).sort((a,b) => getEpochFromWIB(a.startDate||a.date, a.startTime) - getEpochFromWIB(b.startDate||b.date, b.startTime)).slice(0, 5);
+
+            // Earnings estimate
+            const myPending = timesheets.filter(ts => ts.userId === session.id && ts.status === 'pending');
+            const rate = (sysSettings?.baseHourlyRateUSD || 15) * (sysSettings?.usdToIdr || 16000);
+            const pendingHrs = myPending.reduce((a, ts) => a + (parseInt(ts.duration)||0), 0) / 60;
+            const pendingEarned = pendingHrs * rate;
+            const fmtCur = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+
+            return (
+                <div className="space-y-4 stagger animate-fade-in">
+                    {/* Welcome + Earnings */}
+                    <div className="rounded-2xl p-5 text-white shadow-xl relative overflow-hidden" style={{background:`linear-gradient(145deg, ${theme.primaryDark} 0%, ${theme.primary} 55%, ${theme.primaryLight}90 100%)`}}>
+                        <div className="relative z-10">
+                            <h2 className="text-xl font-extrabold leading-tight">Halo, {session.displayName}! 👋</h2>
+                            <p className="text-white/50 text-[11px] mt-1"><i className="fas fa-clock mr-1"></i>{TZ_CONFIG[tz]?.label||tz}</p>
+                        </div>
+                        {pendingHrs > 0 ? (
+                            <div className="relative z-10 mt-4 rounded-2xl p-4" style={{background:'rgba(0,0,0,0.18)', border:'1px solid rgba(255,255,255,0.12)'}}>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-white/60 text-[10px] font-semibold">Estimasi Pendapatan (Pending)</span>
+                                    <span className="text-[9px] text-white/40 bg-white/10 px-2 py-0.5 rounded-full">{pp.currentPeriodStart?.slice(5)} – {pp.currentPeriodEnd?.slice(5)} PT</span>
+                                </div>
+                                <p className="text-2xl font-black text-white">{fmtCur(pendingEarned)}</p>
+                                <p className="text-[10px] text-white/40 mt-1">{pendingHrs.toFixed(1)}j · {myPending.length} laporan pending</p>
+                            </div>
+                        ) : (
+                            <p className="relative z-10 text-white/30 text-sm mt-3 italic">Tidak ada laporan pending.</p>
+                        )}
+                        <i className="fas fa-coins absolute -right-6 -bottom-8 text-[80px] text-white opacity-5"></i>
+                    </div>
+
+                    {/* Working Now */}
+                    <div className="glass-strong rounded-2xl border border-white/50 p-4 card-lift">
+                        <div className="flex justify-between items-start mb-3">
+                            <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide flex items-center gap-2">
+                                <span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{backgroundColor:'#22c55e'}}></span><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span></span>
+                                Sedang Bekerja
+                            </h3>
+                            <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-500 font-mono">{timeDisp} {TZ_CONFIG[tz]?.short}</span>
+                        </div>
+                        {activeWorkers.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                                {activeWorkers.map((w,i) => (
+                                    <div key={i} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-full pl-1 pr-3 py-1 hover:shadow-sm transition-all">
+                                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-black" style={{backgroundColor:w.color||'#94a3b8'}}>{(w.name||'?').substring(0,2).toUpperCase()}</div>
+                                        <span className="text-sm font-bold text-slate-700">{w.name}</span>
+                                        <span className="text-xs text-slate-400">s.d. {toDisplayTime(w.endTime, w.endDate, tz).time}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-sm text-slate-400 italic py-2 flex items-center gap-2"><i className="fas fa-moon text-slate-300 text-xs"></i>Tidak ada yang sedang bekerja</p>
+                        )}
+                    </div>
+
+                    {/* Upcoming */}
+                    <div className="glass-strong rounded-2xl border border-white/50 p-5 card-lift">
+                        <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2 text-sm">
+                            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{background:theme.primary50}}><i className="fas fa-calendar-alt text-[10px]" style={{color:theme.primary}}></i></div>
+                            Jadwal Mendatang
+                        </h3>
+                        <div className="space-y-2.5">
+                            {upcoming.map((s,i) => {
+                                const sO = toDisplayTime(s.startTime, s.startDate||s.date, tz);
+                                const eO = toDisplayTime(s.endTime, s.endDate||s.date, tz);
+                                const u = getU(s.userId);
                                 return (
-                                    <div key={day} className={`glass-strong rounded-2xl border overflow-hidden transition-all ${isT ? 'border-2' : 'border-white/50'}`} style={isT ? {borderColor: theme.primary+'40'} : {}}>
-                                        <button onClick={()=>{setSelDate(day);setViewMode('day')}} className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold ${isT ? 'text-white shadow-md' : 'bg-slate-100 text-slate-500'}`} style={isT ? {background:`linear-gradient(135deg, ${theme.primary}, ${theme.primaryDark})`} : {}}>
-                                                    {day.split('-')[2]}
-                                                </div>
-                                                <div className="text-left">
-                                                    <p className={`text-xs font-bold ${isT ? '' : 'text-slate-700'}`} style={isT ? {color:theme.primary} : {}}>{getDayName(day)}</p>
-                                                    <p className="text-[10px] text-slate-400">{daySch.length} jadwal</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                {daySch.slice(0,4).map(s => {
-                                                    const u = getUserInfo(s.userId);
-                                                    return <div key={s.id} className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[8px] font-bold -ml-1 first:ml-0 border-2 border-white" style={{background:u.color||'#94a3b8'}}>{(u.displayName||'?')[0]}</div>;
-                                                })}
-                                                {daySch.length > 4 && <span className="text-[10px] font-bold text-slate-400 ml-1">+{daySch.length-4}</span>}
-                                                <i className="fas fa-chevron-right text-slate-300 text-[10px] ml-2"></i>
-                                            </div>
-                                        </button>
+                                    <div key={s.id} className="flex items-center p-3 bg-white rounded-xl border border-slate-100 hover:border-blue-200 transition-all">
+                                        <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm" style={{backgroundColor:u.color||'#94a3b8'}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div>
+                                        <div className="ml-3 flex-1 min-w-0">
+                                            <div className="flex justify-between"><span className="font-bold text-slate-700 text-sm truncate">{u.displayName}</span><span className="text-[10px] bg-white border px-2 py-0.5 rounded-full text-slate-500 flex-shrink-0">{formatDateShort(sO.date)}</span></div>
+                                            <div className="text-xs text-slate-500 mt-1">{sO.time} – {eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>
+                                        </div>
                                     </div>
                                 );
                             })}
+                            {upcoming.length===0&&<p className="text-center text-slate-400 text-xs py-4">Belum ada jadwal mendatang</p>}
                         </div>
-                    )}
-
-                    {/* Schedule Form Modal */}
-                    <Modal show={showForm} onClose={()=>{setShowForm(false);setEditId(null)}} title={editId ? 'Edit Jadwal' : 'Jadwal Baru'}>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Tanggal</label>
-                                <input type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium" />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Mulai <span className="text-slate-300">({TZ_CONFIG[tz]?.short})</span></label>
-                                    <input type="time" value={form.startTime} onChange={e=>setForm({...form, startTime:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium font-mono" />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Selesai <span className="text-slate-300">({TZ_CONFIG[tz]?.short})</span></label>
-                                    <input type="time" value={form.endTime} onChange={e=>setForm({...form, endTime:e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium font-mono" />
-                                </div>
-                            </div>
-                            {form.startTime && form.endTime && form.startTime < form.endTime && (
-                                <div className="text-center">
-                                    <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:theme.primary50, color:theme.primary}}>
-                                        <i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(calcDurationMins(form.startTime, form.endTime))}
-                                    </span>
-                                </div>
-                            )}
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Catatan <span className="text-slate-300">(opsional)</span></label>
-                                <textarea value={form.notes} onChange={e=>setForm({...form, notes:e.target.value})} rows={2} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-sm font-medium placeholder:text-slate-300 resize-none" placeholder="cth: Meeting pagi, review PR..." />
-                            </div>
-                            {/* Show converted times if not WIB */}
-                            {tz !== 'WIB' && form.date && form.startTime && form.endTime && (
-                                <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                                    <p className="text-[10px] font-bold text-slate-400 mb-1">Konversi Zona Waktu</p>
-                                    {(td?.enabledTimezones||[]).filter(t=>t!==tz).map(t => {
-                                        const cs = toDbTime(form.startTime, form.date, tz);
-                                        const ce = toDbTime(form.endTime, form.date, tz);
-                                        const ds = toDisplayTime(cs.time, cs.date, t);
-                                        const de = toDisplayTime(ce.time, ce.date, t);
-                                        return <p key={t} className="text-xs text-slate-500"><span className="font-bold">{TZ_CONFIG[t]?.short}:</span> {ds.time} – {de.time} <span className="text-slate-300">({formatDateShort(ds.date)})</span></p>;
-                                    })}
-                                </div>
-                            )}
-                            <div className="flex gap-3 pt-1">
-                                <button onClick={()=>{setShowForm(false);setEditId(null)}} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold text-sm hover:bg-slate-50 transition-all">Batal</button>
-                                <button onClick={saveSchedule} disabled={busy} className="flex-1 btn-primary py-2.5 rounded-xl font-bold text-sm disabled:opacity-50">
-                                    {busy?<><i className="fas fa-spinner fa-spin mr-2"></i>Menyimpan...</>:<><i className={`fas ${editId?'fa-save':'fa-plus'} mr-2`}></i>{editId?'Simpan':'Tambah'}</>}
-                                </button>
-                            </div>
-                        </div>
-                    </Modal>
-
-                    <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
+                    </div>
                 </div>
             );
         };
@@ -1315,6 +1446,7 @@
             const [users, setUsers] = useState([]);
             const [schedules, setSch] = useState([]);
             const [timesheets, setTs] = useState([]);
+            const [sysSettings, setSys] = useState({ dailyQuotaHours: 10, baseHourlyRateUSD: 15, usdToIdr: 16000 });
             const [tz, setTz] = useState(tenant.defaultTimezone||'WIB');
 
             const isSA = session.role==='superadmin';
@@ -1331,7 +1463,7 @@
                 (async () => {
                     try {
                         await window.fa.signInAnonymously(window.auth);
-                        un.push(window.fs.onSnapshot(window.fs.doc(window.db,'tenants',tenant.id), s=>{ if(s.exists()) setTd({id:s.id,...s.data()}); }));
+                        un.push(window.fs.onSnapshot(window.fs.doc(window.db,'tenants',tenant.id), s=>{ if(s.exists()) { const d=s.data(); setTd({id:s.id,...d}); if(d.settings) setSys(prev=>({...prev,...d.settings})); } }));
                         un.push(window.fs.onSnapshot(window.fs.query(window.fs.collection(window.db,'users'), window.fs.where('tenantId','==',tenant.id)), s=>setUsers(s.docs.map(d=>({id:d.id,...d.data()})))));
                         un.push(window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/schedules`), s=>setSch(s.docs.map(d=>({id:d.id,...d.data()})))));
                         un.push(window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/timesheets`), s=>setTs(s.docs.map(d=>({id:d.id,...d.data()})))));
@@ -1341,7 +1473,6 @@
             }, [tenant?.id]);
 
             const etzs = td.enabledTimezones||['WIB'];
-
             const navs = [
                 { id:'dashboard', icon:'fa-home',              l:'Beranda',   show:true },
                 { id:'schedule',  icon:'fa-calendar-alt',      l:'Jadwal',    show:hasPerm('schedule.view_own')||hasPerm('schedule.view_all') },
@@ -1350,18 +1481,7 @@
                 { id:'admin',     icon:'fa-cog',               l:'Admin',     show:canAdmin },
             ].filter(n=>n.show);
 
-            const today = new Date().toISOString().split('T')[0];
-            const todaySch = schedules.filter(s=>s.date===today);
-            const mySch = todaySch.filter(s=>s.userId===session.id);
-            const activeUsers = users.filter(u=>u.isActive);
-
-            const Placeholder = ({icon, color, title, sub}) => (
-                <div className="text-center py-16 animate-fade-in">
-                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{background:color}}><i className={`fas ${icon} text-2xl`} style={{color:'inherit'}}></i></div>
-                    <h2 className="text-xl font-bold text-slate-800 mb-2">{title}</h2>
-                    <p className="text-sm text-slate-400">{sub}</p>
-                </div>
-            );
+            const Placeholder = ({icon, color, title, sub}) => (<div className="text-center py-16 animate-fade-in"><div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{background:color}}><i className={`fas ${icon} text-2xl`} style={{color:'inherit'}}></i></div><h2 className="text-xl font-bold text-slate-800 mb-2">{title}</h2><p className="text-sm text-slate-400">{sub}</p></div>);
 
             return (
                 <div className="min-h-screen pb-20">
@@ -1369,22 +1489,11 @@
                         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 {onBack && <button onClick={onBack} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"><i className="fas fa-arrow-left text-sm"></i></button>}
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-md" style={{background:`linear-gradient(135deg, ${theme.primary}, ${theme.primaryDark})`}}>
-                                    {(td.appName||'S')[0].toUpperCase()}
-                                </div>
-                                <div>
-                                    <h1 className="text-sm font-extrabold text-slate-800 leading-tight">{td.appName||'Scheduler'}</h1>
-                                    {td.appTagline && <p className="text-[10px] text-slate-400">{td.appTagline}</p>}
-                                </div>
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-md" style={{background:`linear-gradient(135deg, ${theme.primary}, ${theme.primaryDark})`}}>{(td.appName||'S')[0].toUpperCase()}</div>
+                                <div><h1 className="text-sm font-extrabold text-slate-800 leading-tight">{td.appName||'Scheduler'}</h1>{td.appTagline&&<p className="text-[10px] text-slate-400">{td.appTagline}</p>}</div>
                             </div>
                             <div className="flex items-center gap-2">
-                                {etzs.length>1 && (
-                                    <div className="flex gap-0.5 p-0.5 rounded-lg bg-slate-100/80">
-                                        {etzs.map(z=>(
-                                            <button key={z} onClick={()=>setTz(z)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${tz===z?'bg-white shadow-sm text-slate-800':'text-slate-400 hover:text-slate-600'}`}>{z}</button>
-                                        ))}
-                                    </div>
-                                )}
+                                {etzs.length>1&&<div className="flex gap-0.5 p-0.5 rounded-lg bg-slate-100/80">{etzs.map(z=><button key={z} onClick={()=>setTz(z)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${tz===z?'bg-white shadow-sm text-slate-800':'text-slate-400 hover:text-slate-600'}`}>{z}</button>)}</div>}
                                 <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:session.color||theme.primary}}>{(session.displayName||'?')[0].toUpperCase()}</div>
                                 <button onClick={onLogout} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-red-50 text-slate-400 hover:text-red-500 transition-all"><i className="fas fa-sign-out-alt text-sm"></i></button>
                             </div>
@@ -1392,74 +1501,16 @@
                     </header>
 
                     <main className="max-w-2xl mx-auto px-4 py-6">
-                        {view==='dashboard' && (
-                            <div className="space-y-4 stagger animate-fade-in">
-                                {/* Welcome */}
-                                <div className="glass-strong rounded-2xl border border-white/50 p-5 card-lift overflow-hidden relative">
-                                    <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-[0.07]" style={{background:theme.primary,transform:'translate(30%,-30%)'}}></div>
-                                    <p className="text-xs font-semibold text-slate-400 mb-0.5">Selamat datang kembali,</p>
-                                    <h2 className="text-xl font-extrabold text-slate-800">{session.displayName} 👋</h2>
-                                    <p className="text-[11px] text-slate-400 mt-1"><i className="fas fa-clock mr-1"></i>{TZ_CONFIG[tz]?.label||tz}</p>
-                                </div>
-                                {/* Stats */}
-                                <div className="grid grid-cols-3 gap-3">
-                                    <div className="glass-strong rounded-2xl border border-white/50 p-4 text-center card-lift">
-                                        <p className="text-2xl font-extrabold" style={{color:theme.primary}}>{mySch.length}</p>
-                                        <p className="text-[10px] font-semibold text-slate-400 mt-0.5">Jadwal Hari Ini</p>
-                                    </div>
-                                    <div className="glass-strong rounded-2xl border border-white/50 p-4 text-center card-lift">
-                                        <p className="text-2xl font-extrabold text-emerald-500">{activeUsers.length}</p>
-                                        <p className="text-[10px] font-semibold text-slate-400 mt-0.5">Anggota Tim</p>
-                                    </div>
-                                    <div className="glass-strong rounded-2xl border border-white/50 p-4 text-center card-lift">
-                                        <p className="text-2xl font-extrabold text-amber-500">{todaySch.length}</p>
-                                        <p className="text-[10px] font-semibold text-slate-400 mt-0.5">Total Hari Ini</p>
-                                    </div>
-                                </div>
-                                {/* Team today */}
-                                {hasPerm('schedule.view_all') && todaySch.length>0 && (
-                                    <div className="glass-strong rounded-2xl border border-white/50 p-5">
-                                        <h3 className="text-sm font-bold text-slate-800 mb-3"><i className="fas fa-users mr-2" style={{color:theme.primary}}></i>Aktivitas Tim</h3>
-                                        <div className="space-y-2">
-                                            {todaySch.map(s => {
-                                                const usr = users.find(x=>x.id===s.userId);
-                                                return (
-                                                    <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50/60 hover:bg-slate-50 transition-colors">
-                                                        <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{background:usr?.color||'#94a3b8'}}>{(usr?.displayName||'?')[0].toUpperCase()}</div>
-                                                        <span className="flex-1 text-xs font-semibold text-slate-700 truncate">{usr?.displayName||'?'}</span>
-                                                        <span className="text-[11px] font-mono font-semibold text-slate-500">{s.startTime}–{s.endTime}</span>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-                                {todaySch.length===0 && (
-                                    <div className="glass-strong rounded-2xl border border-white/50 p-8 text-center">
-                                        <div className="text-4xl mb-3">📅</div>
-                                        <p className="text-sm font-semibold text-slate-500">Belum ada jadwal hari ini</p>
-                                        <p className="text-xs text-slate-400 mt-1">Jadwal akan muncul saat dibuat</p>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        {view==='schedule' && <ScheduleView schedules={schedules} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} />}
+                        {view==='dashboard' && <DashboardView session={session} td={td} users={users} schedules={schedules} timesheets={timesheets} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} />}
+                        {view==='schedule' && <ScheduleView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} />}
                         {view==='timesheet' && <Placeholder icon="fa-file-invoice-dollar" color="#ecfdf5" title="Modul Timesheet" sub="Akan tersedia di Fase 3" />}
                         {view==='analytics' && <Placeholder icon="fa-chart-pie" color="#eef2ff" title="Modul Analitik" sub="Akan tersedia di Fase 3" />}
                         {view==='admin' && canAdmin && <Placeholder icon="fa-cog" color="#f5f3ff" title="Panel Admin" sub="Akan diperluas di fase berikutnya" />}
                     </main>
 
-                    {/* Bottom Nav */}
-                    <nav className="fixed bottom-0 left-0 right-0 glass-strong border-t border-white/50 shadow-lg z-50 max-w-2xl mx-auto safe-area-bottom">
+                    <nav className="fixed bottom-0 left-0 right-0 glass-strong border-t border-white/50 shadow-lg z-50 max-w-2xl mx-auto">
                         <div className="flex px-2 py-1.5" style={{display:'grid',gridTemplateColumns:`repeat(${navs.length},1fr)`}}>
-                            {navs.map(n => (
-                                <button key={n.id} onClick={()=>setView(n.id)}
-                                    className={`flex flex-col items-center py-2 px-1 rounded-xl transition-all duration-200 active:scale-90 select-none ${view===n.id?'text-white shadow-md':'text-slate-400 hover:text-slate-600 hover:bg-white/40'}`}
-                                    style={view===n.id?{background:`linear-gradient(135deg, ${theme.primary}, ${theme.primaryDark})`}:{}}>
-                                    <i className={`fas ${n.icon} text-[15px] ${view===n.id?'scale-110':''}`}></i>
-                                    <span className="text-[9px] font-bold mt-0.5 tracking-tight">{n.l}</span>
-                                </button>
-                            ))}
+                            {navs.map(n=><button key={n.id} onClick={()=>setView(n.id)} className={`flex flex-col items-center py-2 px-1 rounded-xl transition-all duration-200 active:scale-90 select-none ${view===n.id?'text-white shadow-md':'text-slate-400 hover:text-slate-600 hover:bg-white/40'}`} style={view===n.id?{background:`linear-gradient(135deg, ${theme.primary}, ${theme.primaryDark})`}:{}}><i className={`fas ${n.icon} text-[15px] ${view===n.id?'scale-110':''}`}></i><span className="text-[9px] font-bold mt-0.5 tracking-tight">{n.l}</span></button>)}
                         </div>
                     </nav>
                 </div>
@@ -1519,19 +1570,13 @@
             };
 
             const logout = () => { clearSession(); setSession(null); setTenant(null); applyTheme(1); setState('login'); notify('Berhasil keluar','info'); };
-
             const enterTenant = (t) => { setTenant(t); applyTheme(t.themeId||1); setState('app'); };
             const backToSuper = () => { setTenant(null); applyTheme(1); setState('super'); };
 
             return (
                 <>
                     <Notifs items={notifs} />
-                    {state==='loading' && (
-                        <div className="min-h-screen flex flex-col items-center justify-center animate-fade-in">
-                            <div className="w-12 h-12 rounded-full border-4 border-slate-200 animate-spin" style={{borderTopColor:'var(--c-primary)'}}></div>
-                            <p className="mt-4 text-sm font-medium text-slate-400">Memuat...</p>
-                        </div>
-                    )}
+                    {state==='loading' && <div className="min-h-screen flex flex-col items-center justify-center animate-fade-in"><div className="w-12 h-12 rounded-full border-4 border-slate-200 animate-spin" style={{borderTopColor:'var(--c-primary)'}}></div><p className="mt-4 text-sm font-medium text-slate-400">Memuat...</p></div>}
                     {state==='setup' && <SetupWizard onDone={s=>{setSession(s);saveSession(s);applyTheme(1);setState('super')}} notify={notify} />}
                     {state==='login' && <Login onLogin={login} notify={notify} />}
                     {state==='super' && session && <SuperDash session={session} onLogout={logout} notify={notify} onEnter={enterTenant} />}
