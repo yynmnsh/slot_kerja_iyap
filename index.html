@@ -88,23 +88,25 @@
             --c-bg-1: #eef2ff;
             --c-bg-2: #f8fafc;
             --c-bg-3: #f0fdf4;
-            --nav-dot-x: 0px;
         }
 
         * { box-sizing: border-box; }
         body {
             font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
             background: linear-gradient(145deg, var(--c-bg-1) 0%, var(--c-bg-2) 45%, var(--c-bg-3) 100%);
+            background-attachment: fixed;
             color: #0f172a;
             min-height: 100vh;
             margin: 0;
             overflow-x: hidden;
             -webkit-tap-highlight-color: transparent;
+            -webkit-font-smoothing: antialiased;
         }
 
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.4); border-radius: 99px; }
+        ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.35); border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.55); }
 
         .glass {
             background: rgba(255,255,255,0.72);
@@ -115,7 +117,7 @@
             background: rgba(255,255,255,0.92);
             backdrop-filter: blur(24px) saturate(200%);
             -webkit-backdrop-filter: blur(24px) saturate(200%);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.02);
         }
 
         .btn-primary {
@@ -130,7 +132,7 @@
         .btn-primary::after {
             content: '';
             position: absolute; inset: 0;
-            background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.2) 50%, transparent 60%);
+            background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.18) 50%, transparent 60%);
             transform: translateX(-100%);
             transition: transform 0.5s ease;
         }
@@ -141,16 +143,19 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
         }
         .card-lift:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(0,0,0,0.07), 0 2px 8px rgba(0,0,0,0.03); }
+        .card-lift:active { transform: translateY(0) scale(0.99); }
 
-        .stagger > * { opacity: 0; animation: slideUp 0.4s cubic-bezier(0.16,1,0.3,1) forwards; }
-        .stagger > *:nth-child(1) { animation-delay: 0.04s; }
-        .stagger > *:nth-child(2) { animation-delay: 0.08s; }
-        .stagger > *:nth-child(3) { animation-delay: 0.12s; }
-        .stagger > *:nth-child(4) { animation-delay: 0.16s; }
-        .stagger > *:nth-child(5) { animation-delay: 0.2s; }
-        .stagger > *:nth-child(6) { animation-delay: 0.24s; }
-        .stagger > *:nth-child(7) { animation-delay: 0.28s; }
-        .stagger > *:nth-child(8) { animation-delay: 0.32s; }
+        .stagger > * { opacity: 0; animation: slideUp 0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+        .stagger > *:nth-child(1) { animation-delay: 0.03s; }
+        .stagger > *:nth-child(2) { animation-delay: 0.07s; }
+        .stagger > *:nth-child(3) { animation-delay: 0.11s; }
+        .stagger > *:nth-child(4) { animation-delay: 0.15s; }
+        .stagger > *:nth-child(5) { animation-delay: 0.19s; }
+        .stagger > *:nth-child(6) { animation-delay: 0.23s; }
+        .stagger > *:nth-child(7) { animation-delay: 0.27s; }
+        .stagger > *:nth-child(8) { animation-delay: 0.31s; }
+        .stagger > *:nth-child(9) { animation-delay: 0.35s; }
+        .stagger > *:nth-child(10) { animation-delay: 0.39s; }
 
         input, select, textarea { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
         input:focus, select:focus, textarea:focus {
@@ -169,13 +174,16 @@
         @keyframes shimmer { 0% { background-position: 200% center } 100% { background-position: -200% center } }
         @keyframes floatY { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-12px) } }
         @keyframes pulseSoft { 0%, 100% { opacity: 0.4 } 50% { opacity: 0.8 } }
-        @keyframes notifIn { from { transform: translateX(100%) scale(0.8); opacity: 0 } to { transform: translateX(0) scale(1); opacity: 1 } }
-        @keyframes notifOut { from { transform: translateX(0); opacity: 1 } to { transform: translateX(120%); opacity: 0 } }
-        @keyframes viewEnter { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes notifIn { from { transform: translateX(100%) scale(0.85); opacity: 0 } to { transform: translateX(0) scale(1); opacity: 1 } }
+        @keyframes viewEnter { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }
         @keyframes spinGrow { 0% { transform: rotate(0deg) scale(0.8); opacity: 0 } 50% { opacity: 1 } 100% { transform: rotate(360deg) scale(1); opacity: 1 } }
+        @keyframes gentlePulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }
+        @keyframes slideInLeft { from { transform: translateX(-12px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
 
-        .animate-view-enter { animation: viewEnter 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+        .animate-view-enter { animation: viewEnter 0.3s cubic-bezier(0.16,1,0.3,1) both; }
         .animate-notif-in { animation: notifIn 0.4s cubic-bezier(0.16,1,0.3,1) both; }
+        .animate-gentle-pulse { animation: gentlePulse 2.5s ease-in-out infinite; }
+        .animate-slide-in-left { animation: slideInLeft 0.3s ease-out both; }
 
         .toggle-track {
             width: 44px; height: 24px; border-radius: 12px; padding: 2px;
@@ -199,19 +207,35 @@
 
         button, a { transition-property: color, background-color, border-color, opacity, transform, box-shadow; transition-duration: 0.15s; transition-timing-function: ease; }
 
-        /* Bottom nav dot indicator */
-        .nav-dot { position: relative; }
-        .nav-dot::after {
-            content: ''; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
-            width: 4px; height: 4px; border-radius: 50%; background: transparent; transition: all 0.25s ease;
+        /* Bottom nav pill indicator */
+        .nav-pill { position: relative; }
+        .nav-pill::after {
+            content: ''; position: absolute; bottom: -3px; left: 50%; transform: translateX(-50%);
+            width: 4px; height: 4px; border-radius: 50%; background: transparent; 
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-        .nav-dot.active::after { background: var(--c-primary); width: 16px; border-radius: 3px; }
+        .nav-pill.active::after { background: var(--c-primary); width: 18px; height: 3px; border-radius: 3px; }
 
-        /* Header shadow on scroll */
-        .header-shadow { box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
-
-        /* Smooth number transitions */
+        .header-shadow { box-shadow: 0 1px 12px rgba(0,0,0,0.05); }
         .tabular-nums { font-variant-numeric: tabular-nums; }
+
+        /* Status badge animation */
+        .badge-pulse { animation: gentlePulse 2s ease-in-out infinite; }
+
+        /* Smooth section divider */
+        .section-divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(148,163,184,0.2), transparent); }
+
+        /* Empty state style */
+        .empty-state-icon { 
+            background: linear-gradient(135deg, var(--c-bg-1), var(--c-bg-2));
+            border: 2px dashed rgba(148,163,184,0.25);
+        }
+
+        /* Form section styling */
+        .form-section {
+            background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,250,252,0.9));
+            border: 1px solid rgba(226,232,240,0.6);
+        }
     </style>
 </head>
 <body>
@@ -909,7 +933,7 @@
         /* ═══════════════════════════════════════════════
            SCHEDULE VIEW — full validation from v1
            ═══════════════════════════════════════════════ */
-        const ScheduleView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings }) => {
+        const ScheduleView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings, logAct }) => {
             const [showHistory, setShowHistory] = useState(false);
             const [filterMine, setFilterMine] = useState(false);
             const [sortOrder, setSortOrder] = useState('asc');
@@ -1035,8 +1059,8 @@
 
                         const col=`tenants/${tenant.id}/schedules`;
                         const pl={userId:editId?(schedules.find(s=>s.id===editId)?.userId||session.id):session.id,startDate:dbS.date,startTime:dbS.time,endDate:dbE.date,endTime:dbE.time,updatedAt:new Date().toISOString()};
-                        if(editId){await window.fs.updateDoc(window.fs.doc(window.db,col,editId),pl);notify('Jadwal diperbarui','success');}
-                        else{pl.createdAt=new Date().toISOString();await window.fs.addDoc(window.fs.collection(window.db,col),pl);notify('Jadwal dibuat','success');}
+                        if(editId){await window.fs.updateDoc(window.fs.doc(window.db,col,editId),pl);logAct('schedule_edit',`${dbS.date} ${dbS.time}–${dbE.time}`,session.id);notify('Jadwal diperbarui','success');}
+                        else{pl.createdAt=new Date().toISOString();await window.fs.addDoc(window.fs.collection(window.db,col),pl);logAct('schedule_create',`${dbS.date} ${dbS.time}–${dbE.time}`,session.id);notify('Jadwal dibuat','success');}
                         resetForm();
                     }catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);
                 }});
@@ -1044,7 +1068,7 @@
 
             const del = (id) => {
                 if((timesheets||[]).some(ts=>ts.scheduleId===id)){notify('Tidak bisa hapus — ada laporan terkait','error');return;}
-                setCfm({show:true,title:'Hapus Jadwal?',msg:'Jadwal ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/schedules`,id));notify('Jadwal dihapus','success');}catch(e){notify('Gagal: '+e.message,'error');}}});
+                setCfm({show:true,title:'Hapus Jadwal?',msg:'Jadwal ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{const ds=schedules.find(x=>x.id===id);await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/schedules`,id));if(ds)logAct('schedule_delete',`${ds.startDate||ds.date} ${ds.startTime}–${ds.endTime}`,ds.userId);notify('Jadwal dihapus','success');}catch(e){notify('Gagal: '+e.message,'error');}}});
             };
 
             // Map day summary
@@ -1112,7 +1136,7 @@
         /* ═══════════════════════════════════════════════
            DASHBOARD VIEW — full cards from v1
            ═══════════════════════════════════════════════ */
-        const DashboardView = ({ session, td, users, schedules, timesheets, tz, theme, hasPerm, sysSettings, notify, tenant }) => {
+        const DashboardView = ({ session, td, users, schedules, timesheets, tz, theme, hasPerm, sysSettings, notify, tenant, logAct }) => {
             const [showProfile, setShowProfile] = useState(false);
             const [profForm, setProfForm] = useState({ bankName:'', accountNumber:'', accountHolder:'' });
             const [showPwChange, setShowPwChange] = useState(false);
@@ -1133,6 +1157,7 @@
                 try {
                     await window.fs.updateDoc(window.fs.doc(window.db,'users',session.id), { bankName:profForm.bankName.trim(), accountNumber:profForm.accountNumber.trim(), accountHolder:profForm.accountHolder.trim() });
                     notify('Info pembayaran disimpan','success');
+                    logAct('profile_update','Info bank diperbarui',session.id);
                 } catch(e) { notify('Gagal: '+e.message,'error'); }
                 setProfBusy(false);
             };
@@ -1155,6 +1180,7 @@
                             // Update session
                             const s = loadSession(); if(s){ s.passwordHash=newHash; saveSession(s); }
                             notify('Password berhasil diubah','success');
+                            logAct('profile_update','Password diubah',session.id);
                             setPwForm({ oldPw:'', newPw:'', confirmPw:'' }); setShowPwChange(false);
                         } catch(e) { notify('Gagal: '+e.message,'error'); }
                         setProfBusy(false);
@@ -1271,7 +1297,7 @@
         /* ═══════════════════════════════════════════════
            TIMESHEET VIEW — with ALL v1 validations
            ═══════════════════════════════════════════════ */
-        const TimesheetView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings }) => {
+        const TimesheetView = ({ schedules, timesheets, users, session, tenant, td, tz, theme, hasPerm, notify, sysSettings, logAct }) => {
             const [form, setForm] = useState({ scheduleId:'', date:'', startTime:'', endDate:'', endTime:'' });
             const [editId, setEditId] = useState(null);
             const [busy, setBusy] = useState(false);
@@ -1384,15 +1410,15 @@
                         const idr = Math.round((durMins/60)*rate*xRate);
                         const payload = { userId:session.id, scheduleId:form.scheduleId, date:dbS.date, startTime:dbS.time, endDate:dbE.date, endTime:dbE.time, duration:durMins, paymentUSD:usd, paymentIDR:idr, status:editId?(timesheets.find(t=>t.id===editId)?.status||'pending'):'pending', updatedAt:new Date().toISOString() };
                         const col=`tenants/${tenant.id}/timesheets`;
-                        if(editId){await window.fs.updateDoc(window.fs.doc(window.db,col,editId),payload);notify('Laporan diperbarui','success');}
-                        else{payload.createdAt=new Date().toISOString();await window.fs.addDoc(window.fs.collection(window.db,col),payload);notify('Laporan dikirim','success');}
+                        if(editId){await window.fs.updateDoc(window.fs.doc(window.db,col,editId),payload);logAct('timesheet_edit',`${dbS.date} ${dbS.time}–${dbE.time} (${durMins}m)`,session.id);notify('Laporan diperbarui','success');}
+                        else{payload.createdAt=new Date().toISOString();await window.fs.addDoc(window.fs.collection(window.db,col),payload);logAct('timesheet_create',`${dbS.date} ${dbS.time}–${dbE.time} (${durMins}m)`,session.id);notify('Laporan dikirim','success');}
                         resetForm();
                     }catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);
                 }});
             };
 
             const startEdit = (ts) => { const sO=toDisplayTime(ts.startTime,ts.date,tz); let eDate=ts.endDate||ts.date,eTime=ts.endTime; if(!eTime&&ts.duration){const ep=getEpochFromWIB(ts.date,ts.startTime)+ts.duration*60000;const d=new Date(ep+TZ_CONFIG[tz].offsetUTC*3600000);eDate=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;eTime=`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;} else if(eTime){const uE=toDisplayTime(eTime,eDate,tz);eDate=uE.date;eTime=uE.time;} setForm({scheduleId:ts.scheduleId||'',date:sO.date,startTime:sO.time,endDate:eDate,endTime:eTime||''});setEditId(ts.id);window.scrollTo({top:0,behavior:'smooth'}); };
-            const del = (id) => { setCfm({show:true,title:'Hapus Laporan?',msg:'Laporan ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id));notify('Laporan dihapus','success');}catch(e){notify('Gagal','error');}}}); };
+            const del = (id) => { const ts0=timesheets.find(t=>t.id===id); setCfm({show:true,title:'Hapus Laporan?',msg:'Laporan ini akan dihapus permanen.',danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id));if(ts0)logAct('timesheet_delete',`${ts0.date} ${ts0.startTime} (${ts0.duration||0}m)`,ts0.userId);notify('Laporan dihapus','success');}catch(e){notify('Gagal','error');}}}); };
 
             const pp = getPayPeriodInfo();
             const fmtShort = (ds) => {if(!ds)return'';const[,m,d]=ds.split('-');return`${parseInt(d)}/${parseInt(m)}`;};
@@ -1690,7 +1716,7 @@
         /* ═══════════════════════════════════════════════
            TENANT ADMIN VIEW — Full with paid revert
            ═══════════════════════════════════════════════ */
-        const TenantAdminView = ({ users, timesheets, schedules, session, tenant, td, tz, theme, notify, sysSettings, hasPerm }) => {
+        const TenantAdminView = ({ users, timesheets, schedules, session, tenant, td, tz, theme, notify, sysSettings, hasPerm, logAct }) => {
             const [tab, setTab] = useState('pending');
             const [settingsForm, setSF] = useState({ dailyQuotaHours:10, baseHourlyRateUSD:15, usdToIdr:16000, userRates:{} });
             const [isEditSt, setIsEditSt] = useState(false);
@@ -1710,7 +1736,7 @@
 
             useEffect(()=>{if(!isEditSt)setSF({dailyQuotaHours:sysSettings?.dailyQuotaHours||10,baseHourlyRateUSD:sysSettings?.baseHourlyRateUSD||15,usdToIdr:sysSettings?.usdToIdr||16000,userRates:sysSettings?.userRates||{}});},[sysSettings]);
             useEffect(()=>{if(!tenant?.id)return;const unsub=window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/activityLog`),snap=>{const e=snap.docs.map(d=>({id:d.id,...d.data()}));e.sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));setActLog(e.slice(0,100));});return()=>unsub();},[tenant?.id]);
-            const logAct=async(action,detail,userId)=>{try{await window.fs.addDoc(window.fs.collection(window.db,`tenants/${tenant.id}/activityLog`),{ts:new Date().toISOString(),action,detail,userId});}catch(e){}};
+            // logAct is received as prop from SchedulerApp
 
             // User CRUD
             const saveUser=async(data)=>{try{if(editU){const ud={...data};if(!ud.passwordHash)delete ud.passwordHash;await window.fs.updateDoc(window.fs.doc(window.db,'users',editU.id),ud);logAct('user_edit',data.displayName,session.id);notify('Pengguna diperbarui','success');}else{const q=window.fs.query(window.fs.collection(window.db,'users'),window.fs.where('username','==',data.username));const snap=await window.fs.getDocs(q);if(!snap.empty){notify('Username sudah digunakan','error');return;}await window.fs.setDoc(window.fs.doc(window.db,'users',gid()),{...data,createdAt:new Date().toISOString()});logAct('user_add',data.displayName,session.id);notify('Pengguna dibuat','success');}setShowUF(false);setEditU(null);}catch(e){notify('Gagal: '+e.message,'error');}};
@@ -1907,6 +1933,13 @@
             }, [tenant?.id]);
 
             const etzs=td.enabledTimezones||['WIB'];
+
+            // Shared activity logger — available to all views
+            const logAct = useCallback(async (action, detail, userId) => {
+                if (!tenant?.id) return;
+                try { await window.fs.addDoc(window.fs.collection(window.db, `tenants/${tenant.id}/activityLog`), { ts: new Date().toISOString(), action, detail, userId: userId || session.id }); } catch(e) { console.warn('Log failed:', e); }
+            }, [tenant?.id, session.id]);
+
             const navs=[
                 {id:'dashboard',icon:'fa-home',l:'Beranda',show:true},
                 {id:'schedule',icon:'fa-calendar-alt',l:'Jadwal',show:hasPerm('schedule.view_own')||hasPerm('schedule.view_all')},
@@ -1933,18 +1966,18 @@
                     </header>
                     <main className="max-w-2xl mx-auto px-4 py-5">
                         <div key={view} className="animate-view-enter">
-                            {view==='dashboard'&&<DashboardView session={session} td={td} users={users} schedules={schedules} timesheets={timesheets} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} notify={notify} tenant={tenant} />}
-                            {view==='schedule'&&<ScheduleView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} />}
-                            {view==='timesheet'&&<TimesheetView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} />}
+                            {view==='dashboard'&&<DashboardView session={session} td={td} users={users} schedules={schedules} timesheets={timesheets} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} notify={notify} tenant={tenant} logAct={logAct} />}
+                            {view==='schedule'&&<ScheduleView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} logAct={logAct} />}
+                            {view==='timesheet'&&<TimesheetView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} logAct={logAct} />}
                             {view==='analytics'&&<AnalyticsView schedules={schedules} timesheets={timesheets} users={users} session={session} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} />}
-                            {view==='admin'&&canAdmin&&<TenantAdminView users={users} timesheets={timesheets} schedules={schedules} session={session} tenant={tenant} td={td} tz={tz} theme={theme} notify={notify} sysSettings={sysSettings} hasPerm={hasPerm} />}
+                            {view==='admin'&&canAdmin&&<TenantAdminView users={users} timesheets={timesheets} schedules={schedules} session={session} tenant={tenant} td={td} tz={tz} theme={theme} notify={notify} sysSettings={sysSettings} hasPerm={hasPerm} logAct={logAct} />}
                         </div>
                     </main>
                     <nav className="fixed bottom-0 left-0 right-0 z-50">
                         <div className="max-w-2xl mx-auto">
                             <div className="mx-3 mb-3 glass-strong rounded-2xl shadow-xl border border-white/60 px-2 py-2" style={{display:'grid',gridTemplateColumns:`repeat(${navs.length},1fr)`,gap:'4px'}}>
                                 {navs.map(n=>{const isAct=view===n.id;return(
-                                    <button key={n.id} onClick={()=>setView(n.id)} className={`nav-dot ${isAct?'active':''} flex flex-col items-center py-2 px-1 rounded-xl transition-all duration-250 active:scale-90 select-none relative ${isAct?'':'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`} style={isAct?{color:theme.primary}:{}}>
+                                    <button key={n.id} onClick={()=>setView(n.id)} className={`nav-pill ${isAct?'active':''} flex flex-col items-center py-2 px-1 rounded-xl transition-all duration-250 active:scale-90 select-none relative ${isAct?'':'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`} style={isAct?{color:theme.primary}:{}}>
                                         <i className={`fas ${n.icon} text-base transition-transform duration-200 ${isAct?'scale-110':''}`}></i>
                                         <span className={`text-[9px] font-bold mt-1 tracking-tight transition-colors ${isAct?'':'text-slate-400'}`} style={isAct?{color:theme.primary}:{}}>{n.l}</span>
                                     </button>);})}
