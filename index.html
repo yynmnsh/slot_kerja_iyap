@@ -1417,12 +1417,49 @@
                         const daySch=schedules.filter(s=>getPSTDay(s.startDate||s.date,s.startTime)===todPt);
                         const dayTs=timesheets.filter(ts=>getPSTDay(ts.date,ts.startTime)===todPt);
                         if(daySch.length===0&&dayTs.length===0)return null;
-                        const toBlock=(item,isTs)=>{const sO=toDisplayTime(item.startTime,item.startDate||item.date,tz);let eO;if(isTs&&!item.endTime&&item.duration){const ep=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d=new Date(ep+TZ_CONFIG[tz].offsetUTC*3600000);eO={time:`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`};}else{eO=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,tz);}const sM=parseInt(sO.time.split(':')[0])*60+parseInt(sO.time.split(':')[1]);const eM=parseInt(eO.time.split(':')[0])*60+parseInt(eO.time.split(':')[1]);const w=eM>sM?(eM-sM):0;return{userId:item.userId,sM,w,sO,eO,dm:isTs?(parseInt(item.duration)||0):0};};
-                        const schBlocks=daySch.map(s=>({...toBlock(s,false),id:s.id,userId:s.userId}));
-                        const tsBlocks=dayTs.map(t=>({...toBlock(t,true),id:t.id,userId:t.userId}));
+                        const toBlock=(item,isTs)=>{
+                            const sO=toDisplayTime(item.startTime,item.startDate||item.date,tz);
+                            let eO;
+                            if(isTs&&!item.endTime&&item.duration){const ep=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d=new Date(ep+TZ_CONFIG[tz].offsetUTC*3600000);eO={time:`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`};}
+                            else{eO=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,tz);}
+                            const sM=parseInt(sO.time.split(':')[0])*60+parseInt(sO.time.split(':')[1]);
+                            const eM=parseInt(eO.time.split(':')[0])*60+parseInt(eO.time.split(':')[1]);
+                            const w=eM>sM?(eM-sM):0;
+                            const dm=isTs?(parseInt(item.duration)||0):w;
+                            return{userId:item.userId,sM,w,sO,eO,dm};
+                        };
+                        const schBlocks=daySch.map(s=>({...toBlock(s,false),id:s.id}));
+                        const tsBlocks=dayTs.map(t=>({...toBlock(t,true),id:t.id}));
                         const getUx=(uid)=>users.find(u=>u.id===uid)||{displayName:'?',color:'#94a3b8'};
                         const totalSchM=daySch.reduce((a,s)=>{const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.round((eE-sE)/60000);},0);
                         const totalTsM=dayTs.reduce((a,t)=>a+parseInt(t.duration||0),0);
+                        // Now line
+                        const noL=new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000);
+                        const nowMin=noL.getUTCHours()*60+noL.getUTCMinutes();
+                        const nowPct=nowMin/1440*100;
+                        const nowStr=`${String(noL.getUTCHours()).padStart(2,'0')}:${String(noL.getUTCMinutes()).padStart(2,'0')}`;
+                        const isToday=getPSTDayFromEpoch(Date.now())===todPt;
+
+                        const NowLine=()=>isToday?(<>
+                            <div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{left:`${nowPct}%`}}>
+                                <div className="absolute top-0 bottom-0 w-0.5 bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
+                                <div className="absolute -top-0.5 w-2 h-2 bg-red-500 rounded-full" style={{left:'50%',transform:'translateX(-50%)'}}></div>
+                            </div>
+                            <div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{left:`${nowPct}%`,width:'14px',transform:'translateX(-7px)'}}>
+                                <div className={`hidden group-hover:block absolute ${nowPct>70?'right-0':'left-0'} -top-1 bg-red-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-lg shadow-lg whitespace-nowrap z-50`}>{nowStr} {TZ_CONFIG[tz]?.short}</div>
+                            </div>
+                        </>):null;
+
+                        const BlockTooltip=({b,isGreen})=>{const ux=getUx(b.userId);const pctL=b.sM/1440*100;return(
+                            <div className="absolute top-1 bottom-1 rounded-md flex items-center justify-center overflow-visible group cursor-default z-10" style={{left:`${pctL}%`,width:`${b.w/1440*100}%`,background:ux.color,opacity:0.85}}>
+                                <span className="text-[7px] font-bold text-white truncate px-1">{ux.displayName?.split(' ')[0]}</span>
+                                <div className={`hidden group-hover:flex absolute ${pctL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-800 text-white text-[10px] p-2.5 rounded-xl shadow-xl whitespace-nowrap flex-col gap-1 z-50 border border-slate-700 pointer-events-none`}>
+                                    <div className="flex items-center gap-1.5 border-b border-slate-600 pb-1 mb-0.5"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:ux.color}}></div><span className="font-bold">{ux.displayName}</span></div>
+                                    <span className="text-slate-300 font-mono text-[9px]"><i className="far fa-clock mr-1 text-[8px]"></i>{b.sO.time} – {b.eO.time}</span>
+                                    <span className="text-slate-300 text-[9px]"><i className="fas fa-hourglass-half mr-1 text-[8px]"></i>Durasi: {fmtDuration(b.dm)}</span>
+                                </div>
+                            </div>);};
+
                         return(
                         <div className="glass-strong rounded-2xl border border-white/50 overflow-hidden">
                             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -1434,20 +1471,22 @@
                                 <div className="flex gap-3">
                                     <div className="flex-1 flex items-center gap-2 bg-blue-50 rounded-xl p-2.5 border border-blue-100"><div className="w-3 h-3 rounded-sm bg-blue-500 flex-shrink-0"></div><div><p className="text-[9px] text-blue-500 font-bold uppercase">Jadwal</p><p className="text-xs font-black text-blue-700">{fmtDuration(totalSchM)}</p></div></div>
                                     <div className="flex-1 flex items-center gap-2 bg-emerald-50 rounded-xl p-2.5 border border-emerald-100"><div className="w-3 h-3 rounded-sm bg-emerald-500 flex-shrink-0"></div><div><p className="text-[9px] text-emerald-500 font-bold uppercase">Aktual</p><p className="text-xs font-black text-emerald-700">{fmtDuration(totalTsM)}</p></div></div>
-                                    <div className="flex-1 flex items-center gap-2 bg-slate-50 rounded-xl p-2.5 border border-slate-100"><div className="w-3 h-3 rounded-sm flex-shrink-0" style={{background:totalTsM>=totalSchM?'#22c55e':'#f59e0b'}}></div><div><p className="text-[9px] text-slate-500 font-bold uppercase">Selisih</p><p className={`text-xs font-black ${totalTsM>=totalSchM?'text-emerald-600':'text-amber-600'}`}>{totalTsM>=totalSchM?'+':''}{fmtDuration(Math.abs(totalTsM-totalSchM))}</p></div></div>
+                                    <div className="flex-1 flex items-center gap-2 bg-slate-50 rounded-xl p-2.5 border border-slate-100"><div className="w-3 h-3 rounded-sm flex-shrink-0" style={{background:totalTsM>=totalSchM?'#22c55e':'#f59e0b'}}></div><div><p className="text-[9px] text-slate-500 font-bold uppercase">Selisih</p><p className={`text-xs font-black ${totalTsM>=totalSchM?'text-emerald-600':'text-amber-600'}`}>{totalTsM>=totalSchM?'+':'-'}{fmtDuration(Math.abs(totalTsM-totalSchM))}</p></div></div>
                                 </div>
                                 {/* Dual timeline */}
                                 <div className="space-y-1.5">
                                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Jadwal (Rencana)</p>
-                                    <div className="relative w-full h-8 bg-blue-50 border border-blue-100 rounded-lg overflow-hidden">
-                                        <div className="absolute top-0 left-0 right-0 h-full flex justify-between pointer-events-none">{[0,6,12,18,24].map(h=><div key={h} className="border-l border-blue-200/40 h-full w-0"><span className="text-[6px] text-blue-300 ml-0.5">{String(h).padStart(2,'0')}</span></div>)}</div>
-                                        {schBlocks.filter(b=>b.w>0).map((b,i)=>{const ux=getUx(b.userId);return<div key={i} className="absolute top-1 bottom-1 rounded-md opacity-80 flex items-center justify-center overflow-hidden group" style={{left:`${b.sM/1440*100}%`,width:`${b.w/1440*100}%`,background:ux.color}}><span className="text-[7px] font-bold text-white truncate px-1">{ux.displayName?.split(' ')[0]}</span></div>;})}
+                                    <div className="relative w-full h-10 bg-blue-50 border border-blue-100 rounded-lg overflow-visible">
+                                        <div className="absolute inset-0 flex justify-between pointer-events-none rounded-lg overflow-hidden">{[0,6,12,18,24].map(h=><div key={h} className="border-l border-blue-200/40 h-full w-0"><span className="text-[6px] text-blue-300 ml-0.5 leading-none mt-0.5 block">{String(h).padStart(2,'0')}</span></div>)}</div>
+                                        {schBlocks.filter(b=>b.w>0).map((b,i)=><BlockTooltip key={i} b={b} />)}
+                                        <NowLine />
                                     </div>
                                     <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-2">Aktual (Dilaporkan)</p>
-                                    <div className="relative w-full h-8 bg-emerald-50 border border-emerald-100 rounded-lg overflow-hidden">
-                                        <div className="absolute top-0 left-0 right-0 h-full flex justify-between pointer-events-none">{[0,6,12,18,24].map(h=><div key={h} className="border-l border-emerald-200/40 h-full w-0"><span className="text-[6px] text-emerald-300 ml-0.5">{String(h).padStart(2,'0')}</span></div>)}</div>
-                                        {tsBlocks.filter(b=>b.w>0).map((b,i)=>{const ux=getUx(b.userId);return<div key={i} className="absolute top-1 bottom-1 rounded-md opacity-80 flex items-center justify-center overflow-hidden" style={{left:`${b.sM/1440*100}%`,width:`${b.w/1440*100}%`,background:ux.color}}><span className="text-[7px] font-bold text-white truncate px-1">{ux.displayName?.split(' ')[0]}</span></div>;})}
-                                        {tsBlocks.filter(b=>b.w===0&&b.dm>0).length>0&&<p className="absolute inset-0 flex items-center justify-center text-[8px] text-emerald-400 italic">Laporan tanpa rentang waktu</p>}
+                                    <div className="relative w-full h-10 bg-emerald-50 border border-emerald-100 rounded-lg overflow-visible">
+                                        <div className="absolute inset-0 flex justify-between pointer-events-none rounded-lg overflow-hidden">{[0,6,12,18,24].map(h=><div key={h} className="border-l border-emerald-200/40 h-full w-0"><span className="text-[6px] text-emerald-300 ml-0.5 leading-none mt-0.5 block">{String(h).padStart(2,'0')}</span></div>)}</div>
+                                        {tsBlocks.filter(b=>b.w>0).map((b,i)=><BlockTooltip key={i} b={b} isGreen />)}
+                                        {tsBlocks.filter(b=>b.w===0&&b.dm>0).length>0&&<p className="absolute inset-0 flex items-center justify-center text-[8px] text-emerald-400 italic pointer-events-none">Laporan tanpa rentang waktu</p>}
+                                        <NowLine />
                                     </div>
                                 </div>
                             </div>
