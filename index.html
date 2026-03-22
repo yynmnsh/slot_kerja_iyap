@@ -445,26 +445,40 @@
            24H TIME INPUT — prevents AM/PM on all devices
            ═══════════════════════════════════════════════ */
         const TimeInput = ({ value, onChange, className, required }) => {
+            const [open, setOpen] = useState(false);
             const ref = useRef(null);
+            const dropRef = useRef(null);
             const handleChange = (e) => {
                 let v = e.target.value.replace(/[^0-9]/g, '');
                 if (v.length > 4) v = v.slice(0, 4);
                 if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2);
-                // Validate hours and minutes
                 if (v.length >= 2) { const h = parseInt(v.slice(0, 2)); if (h > 23) v = '23' + v.slice(2); }
                 if (v.length >= 5) { const m = parseInt(v.slice(3, 5)); if (m > 59) v = v.slice(0, 3) + '59'; }
                 onChange({ target: { value: v } });
             };
-            const handleBlur = () => {
+            const handleBlur = (e) => {
+                if (dropRef.current && dropRef.current.contains(e.relatedTarget)) return;
                 if (!value) return;
                 const parts = value.split(':');
-                if (parts.length === 2 && parts[0].length <= 2 && parts[1].length <= 2) {
+                if (parts.length === 2) {
                     const h = String(Math.min(23, Math.max(0, parseInt(parts[0]) || 0))).padStart(2, '0');
                     const m = String(Math.min(59, Math.max(0, parseInt(parts[1]) || 0))).padStart(2, '0');
-                    onChange({ target: { value: `${h}:${m}` } });
+                    onChange({ target: { value: h+':'+m } });
                 }
+                setTimeout(()=>setOpen(false), 150);
             };
-            return <input ref={ref} type="text" inputMode="numeric" maxLength={5} placeholder="HH:MM" value={value||''} onChange={handleChange} onBlur={handleBlur} className={className} required={required} />;
+            const pick = (t) => { onChange({ target: { value: t } }); setOpen(false); ref.current?.focus(); };
+            const times = useMemo(()=>{ const a=[]; for(let h=0;h<24;h++) for(let m=0;m<60;m+=30) a.push(String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')); return a; },[]);
+            useEffect(()=>{if(open&&dropRef.current&&value){const el=dropRef.current.querySelector('[data-active]');if(el)el.scrollIntoView({block:'center',behavior:'auto'});}},[open]);
+            return (
+                <div className="relative">
+                    <input ref={ref} type="text" inputMode="numeric" maxLength={5} placeholder="HH:MM" value={value||''} onChange={handleChange} onFocus={()=>setOpen(true)} onBlur={handleBlur} className={className} required={required} autoComplete="off" />
+                    <button type="button" tabIndex={-1} onClick={()=>{setOpen(!open);if(!open)ref.current?.focus();}} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"><i className="far fa-clock text-xs"></i></button>
+                    {open&&<div ref={dropRef} className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-2xl border border-slate-200 max-h-40 overflow-y-auto z-50 py-1" style={{scrollbarWidth:'thin'}}>
+                        {times.map(t=><button key={t} type="button" data-active={t===value?'':undefined} onClick={()=>pick(t)} className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${t===value?'bg-blue-50 text-blue-700 font-bold':'text-slate-600 hover:bg-slate-50'}`}>{t}</button>)}
+                    </div>}
+                </div>
+            );
         };
 
         /* ═══════════════════════════════════════════════
@@ -1110,7 +1124,7 @@
                 <div className="space-y-4 animate-fade-in">
                     {canCreate && (<div className={`glass-strong rounded-2xl border-t-4 overflow-hidden ${editId?'border-orange-400':''}`} style={editId?{}:{borderTopColor:theme.primary}}>
                         <div className="px-5 pt-4 pb-3 border-b border-slate-100/80 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-blue-100'}`}><i className={`fas ${editId?'fa-pen':'fa-calendar-plus'} text-xs ${editId?'text-orange-600':'text-blue-600'}`}></i></span>{editId?'Edit Jadwal':'Booking Jadwal'}</h3>
+                            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-blue-100'}`}><i className={`fas ${editId?'fa-pen':'fa-calendar-plus'} text-xs ${editId?'text-orange-600':'text-blue-600'}`}></i></span>{editId?'Edit Jadwal':'Buat Jadwal'}</h3>
                             {(editId||isDirty)&&<button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}
                         </div>
                         <div className="p-5 space-y-4">
@@ -1146,7 +1160,7 @@
                                 <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100"><div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-play-circle text-blue-500 text-sm"></i>Mulai ({TZ_CONFIG[tz]?.short})</label></div><input type="date" required value={form.startDate} onChange={e=>{if(!form.endDate)setForm({...form,startDate:e.target.value,endDate:e.target.value});else setForm({...form,startDate:e.target.value});}} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /><TimeInput required value={form.startTime} onChange={e=>setForm({...form,startTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" /></div>
                                 <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50/60 rounded-xl border border-slate-100"><div className="col-span-2"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i className="fas fa-stop-circle text-red-500 text-sm"></i>Selesai ({TZ_CONFIG[tz]?.short})</label></div><input type="date" required value={form.endDate} onChange={e=>setForm({...form,endDate:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm" /><TimeInput required value={form.endTime} onChange={e=>setForm({...form,endTime:e.target.value})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono" /></div>
                                 {newDur>0&&<div className="text-center"><span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background:theme.primary50,color:theme.primary}}><i className="fas fa-clock mr-1"></i>Durasi: {fmtDuration(newDur)}</span></div>}
-                                <button disabled={busy||wouldExceed||(!editId&&(remainM<=0||isOver))} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${wouldExceed||(!editId&&(remainM<=0||isOver))?'bg-red-500 shadow-red-200':editId?'bg-orange-500 hover:bg-orange-600 shadow-orange-200':'shadow-blue-200 btn-primary'}`}>{busy?<i className="fas fa-spinner fa-spin"></i>:wouldExceed?<><i className="fas fa-exclamation-triangle text-xs"></i>Kuota Terlampaui!</>:(!editId&&(remainM<=0||isOver))?<><i className="fas fa-ban text-xs"></i>Kuota Penuh</>:editId?<><i className="fas fa-check text-xs"></i>Simpan</>:<><i className="fas fa-calendar-plus text-xs"></i>Booking</>}</button>
+                                <button disabled={busy||wouldExceed||(!editId&&(remainM<=0||isOver))} className={`w-full py-3 rounded-xl text-white font-bold text-sm shadow-md transition-all active:scale-95 disabled:opacity-60 flex items-center justify-center gap-2 ${wouldExceed||(!editId&&(remainM<=0||isOver))?'bg-red-500 shadow-red-200':editId?'bg-orange-500 hover:bg-orange-600 shadow-orange-200':'shadow-blue-200 btn-primary'}`}>{busy?<i className="fas fa-spinner fa-spin"></i>:wouldExceed?<><i className="fas fa-exclamation-triangle text-xs"></i>Kuota Terlampaui!</>:(!editId&&(remainM<=0||isOver))?<><i className="fas fa-ban text-xs"></i>Kuota Penuh</>:editId?<><i className="fas fa-check text-xs"></i>Simpan</>:<><i className="fas fa-calendar-plus text-xs"></i>Buat Jadwal</>}</button>
                             </form>
                         </div>
                     </div>)}
@@ -1157,7 +1171,7 @@
                         {filtered.length===0&&<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><div className="text-4xl mb-3">📭</div><p className="text-sm font-semibold text-slate-500">Tidak ada jadwal</p></div>}
                         {filtered.map((s)=>{const isMine=s.userId===session.id;const sO=toDisplayTime(s.startTime,s.startDate||s.date,tz);const eO=toDisplayTime(s.endTime,s.endDate||s.date,tz);const u=getU(s.userId);const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;const dm=Math.round((eE-sE)/60000);return(<div key={s.id} className={`glass-strong p-4 rounded-2xl border flex justify-between items-center card-lift ${isMine?'border-l-4':'border-white/50'}`} style={isMine?{borderLeftColor:theme.primary}:{}}><div className="flex items-center gap-3 min-w-0"><div className="w-2 h-10 rounded-full flex-shrink-0" style={{backgroundColor:u.color}}></div><div className="min-w-0"><div className="flex items-center gap-2"><span className="font-bold text-slate-700 text-sm">{u.displayName}</span>{isMine&&<span className="text-[10px] font-bold px-1.5 rounded" style={{background:theme.primary50,color:theme.primary}}>Saya</span>}</div><div className="text-xs text-slate-500 mt-1">{formatDateShort(sO.date)} · {sO.time}–{eO.time} <span className="text-[8px] bg-slate-200 px-1 rounded">{TZ_CONFIG[tz]?.short}</span></div>{dm>0&&<span className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><i className="far fa-clock text-[9px]"></i>{fmtDuration(dm)}</span>}</div></div>{(canEdit(s)||canDel(s))&&<div className="flex gap-1.5 flex-shrink-0 ml-2">{canEdit(s)&&<button onClick={()=>startEdit(s)} className="w-8 h-8 rounded-full bg-white border border-blue-100 text-blue-500 hover:bg-blue-50 flex items-center justify-center transition"><i className="fas fa-pen text-xs"></i></button>}{canDel(s)&&<button onClick={()=>del(s.id)} className="w-8 h-8 rounded-full bg-white border border-red-100 text-red-500 hover:bg-red-50 flex items-center justify-center transition"><i className="fas fa-trash text-xs"></i></button>}</div>}</div>);})}
                     </div>
-                    <Confirm show={bookCfm.show} title="Konfirmasi Booking" msg="Pastikan data jadwal sudah benar. Lanjutkan?" onOk={bookCfm.action} onNo={()=>setBookCfm({show:false,action:null})} />
+                    <Confirm show={bookCfm.show} title="Konfirmasi Jadwal" msg="Pastikan data jadwal sudah benar. Lanjutkan?" onOk={bookCfm.action} onNo={()=>setBookCfm({show:false,action:null})} />
                     <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
                 </div>
             );
@@ -1276,7 +1290,7 @@
                                     <p className="text-3xl font-black tracking-tight tabular-nums">{fmtC(thisPeriodAmt + carryAmt)}</p>
                                     <p className="text-[10px] text-white/35 mt-1">{(thisPeriodHrs+carryHrs).toFixed(1)}j · Dibayar Rabu {fmtShort(pp.upcomingPayday)}</p>
                                 </div>
-                                {carryHrs > 0 && <div className="flex items-center justify-between px-4 py-2" style={{borderTop:'1px solid rgba(255,255,255,0.06)',background:'rgba(234,179,8,0.08)'}}><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-400/75"></div><span className="text-[9px] text-amber-200/70 font-semibold">Carry-over (periode lalu)</span></div><span className="text-[11px] font-black text-amber-100/80 tabular-nums">{fmtC(carryAmt)}</span></div>}
+                                {carryHrs > 0 && <div className="flex items-center justify-between px-4 py-2" style={{borderTop:'1px solid rgba(255,255,255,0.06)',background:'rgba(234,179,8,0.08)'}}><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-400/75"></div><span className="text-[9px] text-amber-200/70 font-semibold">Sisa periode lalu</span></div><span className="text-[11px] font-black text-amber-100/80 tabular-nums">{fmtC(carryAmt)}</span></div>}
                                 {nextHrs > 0 && <div className="flex items-center justify-between px-4 py-2" style={{borderTop:'1px solid rgba(255,255,255,0.06)',background:'rgba(139,92,246,0.06)'}}><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-violet-400/75"></div><span className="text-[9px] text-violet-200/70 font-semibold">Periode berikutnya</span></div><span className="text-[11px] font-black text-violet-100/80 tabular-nums">{fmtC(nextAmt)}</span></div>}
                             </div>
                         ) : <p className="relative z-10 text-white/25 text-sm mt-4 italic">Tidak ada laporan pending.</p>}
@@ -1512,85 +1526,73 @@
                         const hasData=daySch.length>0||dayTs.length>0;
                         const pctMatch=totalSchM>0?Math.min(100,Math.round(totalTsM/totalSchM*100)):totalTsM>0?100:0;
 
-                        const NowLine=()=>isTodayMap?(
-                            <div className="absolute top-0 bottom-0 z-20" style={{left:`${nowPct}%`}}>
-                                <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
-                                <div className="absolute -top-1 w-2.5 h-2.5 bg-red-500 rounded-full shadow pointer-events-none" style={{left:'50%',transform:'translateX(-50%)'}}></div>
-                                {/* Hover zone — tooltip only on hover */}
-                                <div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{width:'14px',transform:'translateX(-7px)'}}>
-                                    <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 -top-6 bg-red-600 text-white text-[8px] font-bold px-2 py-0.5 rounded-lg shadow-lg whitespace-nowrap z-50">{nowStr} {TZ_CONFIG[tz]?.short}</div>
-                                </div>
-                            </div>
-                        ):null;
-
-                        const Block=({b,variant})=>{const ux=getUx(b.userId);const pctL=b.sM/1440*100;const pctW=Math.max(b.w/1440*100,1.2);const nm=ux.displayName||'?';const initials=nm.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);return(
-                            <div className="absolute top-1 bottom-1 rounded-md flex items-center justify-center overflow-visible group cursor-default z-10 hover:z-40 transition-all duration-150 hover:brightness-110" style={{left:`${pctL}%`,width:`${pctW}%`,background:ux.color,opacity:0.88,boxShadow:`0 1px 4px ${ux.color}25`}}>
-                                <span className="text-[7px] font-bold text-white truncate px-0.5 drop-shadow-sm">{b.w>60?nm.split(' ')[0]:b.w>25?initials:''}</span>
-                                <div className={`hidden group-hover:flex absolute ${pctL>50?'right-0':'left-0'} bottom-full mb-1.5 bg-slate-900/95 backdrop-blur-md text-white text-[10px] p-2.5 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-1 z-50 border border-white/10 pointer-events-none`}>
-                                    <div className="flex items-center gap-1.5 pb-1 border-b border-white/10">
-                                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background:ux.color}}></div>
-                                        <span className="font-bold text-[11px]">{ux.displayName}</span>
-                                    </div>
-                                    <span className="text-slate-300 font-mono text-[9px]"><i className="far fa-clock text-[8px] text-slate-500 mr-1"></i>{b.sO.time}–{b.eO.time}</span>
-                                    <span className="text-slate-300 text-[9px]"><i className="fas fa-hourglass-half text-[8px] text-slate-500 mr-1"></i>{fmtDuration(b.dm)}</span>
+                        const Block=({b})=>{const ux=getUx(b.userId);const pctL=b.sM/1440*100;const pctW=Math.max(b.w/1440*100,1);const nm=ux.displayName||'?';const ini=nm.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);return(
+                            <div className="absolute top-0.5 bottom-0.5 rounded flex items-center justify-center overflow-visible group cursor-default z-10 hover:z-40 transition-all duration-150 hover:brightness-110" style={{left:`${pctL}%`,width:`${pctW}%`,background:ux.color,opacity:0.9}}>
+                                <span className="text-[6px] font-bold text-white truncate px-0.5">{b.w>60?nm.split(' ')[0]:b.w>20?ini:''}</span>
+                                <div className={`hidden group-hover:flex absolute ${pctL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur-md text-white text-[10px] p-2 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-0.5 z-50 border border-white/10 pointer-events-none`}>
+                                    <div className="flex items-center gap-1.5 pb-1 border-b border-white/10"><div className="w-2 h-2 rounded-full" style={{background:ux.color}}></div><span className="font-bold text-[10px]">{ux.displayName}</span></div>
+                                    <span className="text-slate-300 font-mono text-[9px]">{b.sO.time}–{b.eO.time} · {fmtDuration(b.dm)}</span>
                                 </div>
                             </div>);};
 
-                        const TimeRow=({label,color,blocks})=>(
-                            <div>
-                                <span className={`text-[8px] font-bold uppercase tracking-widest ${color} mb-1 block`}>{label}</span>
-                                <div className="relative w-full h-9 rounded-lg overflow-visible bg-slate-50/80 border border-slate-100/60">
-                                    <div className="absolute inset-0 flex pointer-events-none rounded-lg overflow-hidden">{Array.from({length:25},(_, h)=><div key={h} className={`h-full flex-shrink-0 ${h%6===0?'border-l border-slate-200/50':h%3===0?'border-l border-slate-100/30':''}`} style={{width:`${100/24}%`}}>{h%6===0&&<span className="text-[5px] font-mono text-slate-300 ml-0.5 mt-0.5 block">{String(h).padStart(2,'0')}</span>}</div>)}</div>
-                                    {blocks.filter(b=>b.w>0).map((b,i)=><Block key={i} b={b} variant={label} />)}
-                                    <NowLine />
-                                </div>
-                            </div>
-                        );
-
                         return(
-                        <div className="rounded-2xl overflow-hidden shadow-lg" style={{background:'rgba(255,255,255,0.95)',border:'1px solid rgba(226,232,240,0.4)'}}>
+                        <div className="rounded-2xl overflow-hidden" style={{background:'rgba(255,255,255,0.95)',border:'1px solid rgba(226,232,240,0.4)',boxShadow:'0 2px 12px rgba(0,0,0,0.04)'}}>
                             {/* Header */}
-                            <div className="px-4 py-3 flex items-center justify-between" style={{background:`linear-gradient(135deg, ${theme.primaryDark}, ${theme.primary})`}}>
-                                <div>
-                                    <h3 className="text-[13px] font-bold text-white flex items-center gap-2"><i className="fas fa-chart-gantt"></i>Jadwal vs Aktual</h3>
-                                    <p className="text-white/35 text-[10px] mt-0.5">Perbandingan rencana & realisasi harian</p>
-                                </div>
-                                <div className="flex items-center gap-0.5 bg-white/10 rounded-xl p-0.5 backdrop-blur-sm border border-white/10">
+                            <div className="px-4 py-2.5 flex items-center justify-between" style={{background:`linear-gradient(135deg, ${theme.primaryDark}, ${theme.primary})`}}>
+                                <h3 className="text-[13px] font-bold text-white flex items-center gap-2"><i className="fas fa-chart-gantt"></i>Jadwal vs Aktual</h3>
+                                <div className="flex items-center gap-0.5 bg-white/10 rounded-xl p-0.5 border border-white/10">
                                     <button onClick={()=>shiftTsPt(-1)} className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all active:scale-90"><i className="fas fa-chevron-left text-[10px]"></i></button>
-                                    <button onClick={()=>setTsPt(todayPtTs)} className={`px-3 h-7 text-[10px] font-bold rounded-lg min-w-[68px] text-center transition-all ${tsPt===todayPtTs?'bg-white shadow-md':'text-white/80 hover:bg-white/15'}`} style={tsPt===todayPtTs?{color:theme.primary}:{}}>{tsPt===todayPtTs?'Hari Ini':formatDateShort(tsPt)}</button>
+                                    <button onClick={()=>setTsPt(todayPtTs)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[64px] text-center transition-all ${tsPt===todayPtTs?'bg-white shadow-md':'text-white/80 hover:bg-white/15'}`} style={tsPt===todayPtTs?{color:theme.primary}:{}}>{tsPt===todayPtTs?'Hari Ini':formatDateShort(tsPt)}</button>
                                     <button onClick={()=>shiftTsPt(1)} className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all active:scale-90"><i className="fas fa-chevron-right text-[10px]"></i></button>
                                 </div>
                             </div>
                             {hasData?(
-                            <div className="p-4 space-y-4">
+                            <div className="p-4 space-y-3">
                                 {/* Stats row */}
                                 <div className="grid grid-cols-3 gap-2">
-                                    <div className="text-center p-2.5 rounded-xl bg-blue-50/70 border border-blue-100/50">
-                                        <p className="text-[8px] font-bold text-blue-400 uppercase tracking-widest">Rencana</p>
-                                        <p className="text-sm font-black text-blue-700 tabular-nums mt-0.5">{fmtDuration(totalSchM)}</p>
-                                        <p className="text-[9px] text-blue-400 mt-0.5">{daySch.length} jadwal</p>
+                                    <div className="text-center p-2 rounded-xl bg-blue-50/70 border border-blue-100/50">
+                                        <p className="text-[7px] font-bold text-blue-400 uppercase tracking-widest">Rencana</p>
+                                        <p className="text-sm font-black text-blue-700 tabular-nums">{fmtDuration(totalSchM)}</p>
                                     </div>
-                                    <div className="text-center p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-100/50">
-                                        <p className="text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Aktual</p>
-                                        <p className="text-sm font-black text-emerald-700 tabular-nums mt-0.5">{fmtDuration(totalTsM)}</p>
-                                        <p className="text-[9px] text-emerald-400 mt-0.5">{dayTs.length} laporan</p>
+                                    <div className="text-center p-2 rounded-xl bg-emerald-50/70 border border-emerald-100/50">
+                                        <p className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">Aktual</p>
+                                        <p className="text-sm font-black text-emerald-700 tabular-nums">{fmtDuration(totalTsM)}</p>
                                     </div>
-                                    <div className="text-center p-2.5 rounded-xl border" style={{background:diff>=0?'rgba(16,185,129,0.05)':'rgba(245,158,11,0.05)',borderColor:diff>=0?'rgba(16,185,129,0.12)':'rgba(245,158,11,0.12)'}}>
-                                        <p className="text-[8px] font-bold uppercase tracking-widest" style={{color:diff>=0?'#10b981':'#f59e0b'}}>Selisih</p>
-                                        <p className={`text-sm font-black tabular-nums mt-0.5 ${diff>=0?'text-emerald-700':'text-amber-700'}`}>{diff>=0?'+':''}{fmtDuration(Math.abs(diff))}</p>
-                                        <p className="text-[9px] mt-0.5" style={{color:diff>=0?'#10b981':'#f59e0b'}}>{pctMatch}% match</p>
+                                    <div className="text-center p-2 rounded-xl border" style={{background:diff>=0?'rgba(16,185,129,0.05)':'rgba(245,158,11,0.05)',borderColor:diff>=0?'rgba(16,185,129,0.12)':'rgba(245,158,11,0.12)'}}>
+                                        <p className="text-[7px] font-bold uppercase tracking-widest" style={{color:diff>=0?'#10b981':'#f59e0b'}}>Selisih</p>
+                                        <p className={`text-sm font-black tabular-nums ${diff>=0?'text-emerald-700':'text-amber-700'}`}>{diff>=0?'+':''}{fmtDuration(Math.abs(diff))}</p>
                                     </div>
                                 </div>
-                                {/* Timelines */}
-                                <div className="space-y-2">
-                                    <TimeRow label="Rencana" color="text-blue-400" blocks={schBlocks} />
-                                    <TimeRow label="Aktual" color="text-emerald-400" blocks={tsBlocks} />
+                                {/* UNIFIED dual timeline — single NowLine spanning both */}
+                                <div className="relative rounded-xl overflow-visible bg-slate-50/50 border border-slate-100/60">
+                                    {/* Hour marks shared across both rows */}
+                                    <div className="absolute inset-0 flex pointer-events-none rounded-xl overflow-hidden z-0">{Array.from({length:25},(_, h)=><div key={h} className={`h-full flex-shrink-0 ${h%6===0?'border-l border-slate-200/50':h%3===0?'border-l border-slate-100/30':''}`} style={{width:`${100/24}%`}}>{h%6===0&&<span className="text-[5px] font-mono text-slate-300 ml-0.5 mt-0.5 block">{String(h).padStart(2,'0')}</span>}</div>)}</div>
+                                    {/* Rencana row */}
+                                    <div className="relative h-8 border-b border-slate-200/40">
+                                        <span className="absolute left-1 bottom-0.5 text-[6px] font-bold text-blue-400 uppercase z-[5] pointer-events-none opacity-60">Rencana</span>
+                                        {schBlocks.filter(b=>b.w>0).map((b,i)=><Block key={'s'+i} b={b} />)}
+                                    </div>
+                                    {/* Aktual row */}
+                                    <div className="relative h-8">
+                                        <span className="absolute left-1 bottom-0.5 text-[6px] font-bold text-emerald-400 uppercase z-[5] pointer-events-none opacity-60">Aktual</span>
+                                        {tsBlocks.filter(b=>b.w>0).map((b,i)=><Block key={'a'+i} b={b} />)}
+                                    </div>
+                                    {/* Single NowLine spanning both rows — hover only */}
+                                    {isTodayMap&&(
+                                        <div className="absolute top-0 bottom-0 z-20" style={{left:`${nowPct}%`}}>
+                                            <div className="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
+                                            <div className="absolute -top-1 w-2 h-2 bg-red-500 rounded-full pointer-events-none" style={{left:'50%',transform:'translateX(-50%)'}}></div>
+                                            <div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{width:'16px',transform:'translateX(-8px)'}}>
+                                                <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 -top-5 bg-red-600 text-white text-[8px] font-bold px-2 py-0.5 rounded-lg shadow-lg whitespace-nowrap">{nowStr} {TZ_CONFIG[tz]?.short}</div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             ):(
-                            <div className="px-4 py-10 text-center">
-                                <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-slate-100 border-2 border-dashed border-slate-200"><i className="fas fa-calendar-xmark text-slate-300 text-xl"></i></div>
-                                <p className="text-sm font-semibold text-slate-400">Tidak ada data pada tanggal ini</p>
+                            <div className="px-4 py-8 text-center">
+                                <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-slate-50 border border-dashed border-slate-200"><i className="fas fa-calendar-xmark text-slate-300 text-lg"></i></div>
+                                <p className="text-sm font-semibold text-slate-400">Tidak ada data</p>
                                 <p className="text-[10px] text-slate-300 mt-1">Gunakan ◀ ▶ untuk berpindah hari</p>
                             </div>
                             )}
