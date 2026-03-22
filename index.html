@@ -1,3 +1,5 @@
+</body>
+</html>
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -1221,6 +1223,21 @@
 
             return (
                 <div className="space-y-4 stagger animate-fade-in">
+                    {/* Bank info prompt — shown if user hasn't filled payment info */}
+                    {me && !me.bankName && !me.accountNumber && (
+                        <div className="rounded-2xl border-2 border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 animate-slide-in-left">
+                            <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0"><i className="fas fa-university text-amber-500 text-base"></i></div>
+                                <div className="flex-1">
+                                    <h4 className="font-bold text-amber-800 text-sm">Lengkapi Informasi Rekening</h4>
+                                    <p className="text-[11px] text-amber-600/80 mt-0.5 leading-relaxed">Isi data rekening bank agar Admin dapat memproses pembayaran Anda. Data ini diperlukan sebelum pengiriman laporan kerja.</p>
+                                    <button onClick={()=>setShowProfile(true)} className="mt-2.5 inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all active:scale-95 shadow-sm shadow-amber-200">
+                                        <i className="fas fa-pen text-[9px]"></i>Isi Sekarang
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {/* Welcome + Earnings */}
                     <div className="rounded-3xl p-5 text-white shadow-2xl relative overflow-hidden" style={{background:`linear-gradient(145deg, ${theme.primaryDark} 0%, ${theme.primary} 50%, ${theme.primaryLight}88 100%)`}}>
                         {/* Decorative circles */}
@@ -1750,7 +1767,7 @@
             const fmtC = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
             const getAmt = (ts) => (parseFloat(ts.paymentUSD)||0) * xRate;
 
-            useEffect(()=>{if(!isEditSt)setSF({dailyQuotaHours:sysSettings?.dailyQuotaHours||10,baseHourlyRateUSD:sysSettings?.baseHourlyRateUSD||15,usdToIdr:sysSettings?.usdToIdr||16000,userRates:sysSettings?.userRates||{}});},[sysSettings]);
+            useEffect(()=>{if(!isEditSt&&sysSettings._loaded)setSF({dailyQuotaHours:sysSettings.dailyQuotaHours||10,baseHourlyRateUSD:sysSettings.baseHourlyRateUSD||15,usdToIdr:sysSettings.usdToIdr||16000,userRates:sysSettings.userRates||{}});},[sysSettings]);
             useEffect(()=>{if(!tenant?.id)return;const unsub=window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/activityLog`),snap=>{const e=snap.docs.map(d=>({id:d.id,...d.data()}));e.sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));setActLog(e.slice(0,100));});return()=>unsub();},[tenant?.id]);
             // logAct is received as prop from SchedulerApp
 
@@ -1779,7 +1796,7 @@
             const dlCSV=(name,rows)=>{const bom='\uFEFF';const csv=rows.map(r=>r.map(c=>`"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();};
             const exportSch=()=>{dlCSV(`jadwal_${getToday()}.csv`,[['ID','User','Tgl Mulai','Mulai','Tgl Selesai','Selesai','Updated'],...schedules.map(s=>[s.id,getU(s.userId).displayName,s.startDate||s.date,s.startTime,s.endDate||s.date,s.endTime,s.updatedAt||''])]);notify('CSV diunduh','success');};
             const exportTs=()=>{dlCSV(`laporan_${getToday()}.csv`,[['ID','User','Tanggal','Mulai','Selesai','Durasi','USD','IDR','Status','Dibayar'],...timesheets.map(ts=>[ts.id,getU(ts.userId).displayName,ts.date,ts.startTime,ts.endTime||'',ts.duration||0,ts.paymentUSD||0,ts.paymentIDR||0,ts.status,ts.paidAt||''])]);notify('CSV diunduh','success');};
-            const saveSt=async()=>{setBusy(true);try{const cleanRates={};if(settingsForm.userRates){Object.entries(settingsForm.userRates).forEach(([uid,val])=>{const n=parseFloat(val);if(n>0)cleanRates[uid]=n;});}const payload={...settingsForm,userRates:cleanRates};await window.fs.updateDoc(window.fs.doc(window.db,'tenants',tenant.id),{settings:payload});logAct('settings_update',`kuota=${settingsForm.dailyQuotaHours}j rate=$${settingsForm.baseHourlyRateUSD}`,session.id);notify('Pengaturan disimpan','success');setIsEditSt(false);}catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);};
+            const saveSt=async()=>{setBusy(true);try{const cleanRates={};if(settingsForm.userRates){Object.entries(settingsForm.userRates).forEach(([uid,val])=>{const n=parseFloat(val);if(n>0)cleanRates[uid]=n;});}const payload={...settingsForm,userRates:cleanRates};delete payload._loaded;await window.fs.updateDoc(window.fs.doc(window.db,'tenants',tenant.id),{settings:payload});logAct('settings_update',`kuota=${settingsForm.dailyQuotaHours}j rate=$${settingsForm.baseHourlyRateUSD}`,session.id);notify('Pengaturan disimpan','success');setIsEditSt(false);}catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);};
 
             const RoleBadge=({role})=>{const m={admin:{bg:'bg-purple-100',tx:'text-purple-700',l:'Admin'},semiadmin:{bg:'bg-blue-100',tx:'text-blue-700',l:'Semi-Admin'},user:{bg:'bg-slate-100',tx:'text-slate-600',l:'User'}};const s=m[role]||m.user;return<span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.bg} ${s.tx}`}>{s.l}</span>;};
             const tabs=[{id:'pending',l:'Pending',icon:'fa-money-bill-wave'},{id:'history',l:'Riwayat',icon:'fa-receipt'},{id:'users',l:'Pengguna',icon:'fa-users'},{id:'log',l:'Log',icon:'fa-history'},{id:'export',l:'CSV',icon:'fa-download'},{id:'settings',l:'',icon:'fa-cog'}];
@@ -1796,17 +1813,34 @@
                             {!hasSel&&pendSh.length>0&&<div className="px-4 pb-3 pt-1"><p className="text-center text-[11px] text-slate-500 italic"><i className="fas fa-hand-point-down mr-1"></i>Pilih laporan di bawah</p></div>}
                         </div>
                         {pendSh.length===0?<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><i className="fas fa-check-circle text-3xl text-slate-200 mb-3 block"></i><p className="text-slate-400 text-sm">Tidak ada tagihan pending</p></div>:
-                        pendByUser.map(grp=>{const u=getU(grp.uid);const uSel=selectedSheets[grp.uid]||new Set();const allSel=grp.sheets.every(s=>uSel.has(s.id));const someSel=grp.sheets.some(s=>uSel.has(s.id));const isExp=expandedUsers[grp.uid]!==false;const selCount=[...uSel].filter(id=>grp.sheets.some(s=>s.id===id)).length;const selAmt=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+getAmt(s),0);const selMinsU=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+parseInt(s.duration||0),0);return(
+                        pendByUser.map(grp=>{const u=getU(grp.uid);const uFull=users.find(x=>x.id===grp.uid);const uSel=selectedSheets[grp.uid]||new Set();const allSel=grp.sheets.every(s=>uSel.has(s.id));const someSel=grp.sheets.some(s=>uSel.has(s.id));const isExp=expandedUsers[grp.uid]!==false;const selCount=[...uSel].filter(id=>grp.sheets.some(s=>s.id===id)).length;const selAmt=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+getAmt(s),0);const selMinsU=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+parseInt(s.duration||0),0);const hasBank=uFull?.bankName&&uFull?.accountNumber;return(
                             <div key={grp.uid} className="glass-strong rounded-2xl border overflow-hidden" style={{borderColor:someSel?u.color+'55':'rgba(148,163,184,0.2)'}}>
-                                <div className="flex items-center gap-3 px-3 py-3" style={{backgroundColor:someSel?u.color+'12':'transparent'}}>
-                                    <div onClick={()=>toggleAllUser(grp.uid,grp.sheets)} className="flex-shrink-0 cursor-pointer p-1 -ml-1 active:scale-90"><div className="w-6 h-6 rounded-lg border-2 flex items-center justify-center" style={{borderColor:allSel||someSel?u.color:'#cbd5e1',backgroundColor:allSel?u.color:someSel?u.color+'22':'white'}}>{allSel&&<i className="fas fa-check text-white text-[10px]"></i>}{someSel&&!allSel&&<i className="fas fa-minus text-[10px]" style={{color:u.color}}></i>}</div></div>
-                                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0 shadow-sm" style={{backgroundColor:u.color}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap"><p className="font-black text-slate-800 text-sm">{u.displayName}</p></div>
-                                        <p className="text-[10px] text-slate-400 mt-0.5">Total: {grp.sheets.length} lap · {fmtDuration(grp.mins)} · {fmtC(grp.total)}</p>
-                                        {someSel&&<p className="text-[10px] font-bold mt-0.5" style={{color:u.color}}><i className="fas fa-check-circle mr-0.5 text-[8px]"></i>Dipilih: {selCount}/{grp.sheets.length} lap · {fmtDuration(selMinsU)} · {fmtC(selAmt)}</p>}
+                                <div className="px-3 py-3" style={{backgroundColor:someSel?u.color+'12':'transparent'}}>
+                                    <div className="flex items-center gap-3">
+                                        <div onClick={()=>toggleAllUser(grp.uid,grp.sheets)} className="flex-shrink-0 cursor-pointer p-1 -ml-1 active:scale-90"><div className="w-6 h-6 rounded-lg border-2 flex items-center justify-center" style={{borderColor:allSel||someSel?u.color:'#cbd5e1',backgroundColor:allSel?u.color:someSel?u.color+'22':'white'}}>{allSel&&<i className="fas fa-check text-white text-[10px]"></i>}{someSel&&!allSel&&<i className="fas fa-minus text-[10px]" style={{color:u.color}}></i>}</div></div>
+                                        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-xs flex-shrink-0 shadow-sm" style={{backgroundColor:u.color}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap"><p className="font-black text-slate-800 text-sm">{u.displayName}</p></div>
+                                            <p className="text-[10px] text-slate-400 mt-0.5">Total: {grp.sheets.length} lap · {fmtDuration(grp.mins)} · {fmtC(grp.total)}</p>
+                                            {someSel&&<p className="text-[10px] font-bold mt-0.5" style={{color:u.color}}><i className="fas fa-check-circle mr-0.5 text-[8px]"></i>Dipilih: {selCount}/{grp.sheets.length} · {fmtDuration(selMinsU)} · {fmtC(selAmt)}</p>}
+                                        </div>
+                                        <button onClick={()=>setExpU(p=>({...p,[grp.uid]:!isExp}))} className="text-slate-300 p-1"><i className={`fas fa-chevron-${isExp?'up':'down'} text-xs`}></i></button>
                                     </div>
-                                    <button onClick={()=>setExpU(p=>({...p,[grp.uid]:!isExp}))} className="text-slate-300 p-1"><i className={`fas fa-chevron-${isExp?'up':'down'} text-xs`}></i></button>
+                                    {/* Bank info row */}
+                                    {hasBank?(
+                                        <div className="mt-2 ml-[52px] flex items-center gap-2 bg-white/60 border border-slate-100 rounded-lg px-2.5 py-1.5">
+                                            <i className="fas fa-university text-[10px] text-slate-400"></i>
+                                            <span className="text-[10px] font-semibold text-slate-600">{uFull.bankName}</span>
+                                            <span className="text-slate-300">·</span>
+                                            <span className="text-[10px] font-mono text-slate-700 font-bold tracking-wide">{uFull.accountNumber}</span>
+                                            {uFull.accountHolder&&<><span className="text-slate-300">·</span><span className="text-[10px] text-slate-500">a.n. {uFull.accountHolder}</span></>}
+                                        </div>
+                                    ):(
+                                        <div className="mt-2 ml-[52px] flex items-center gap-1.5 text-[10px] text-amber-500 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5">
+                                            <i className="fas fa-exclamation-triangle text-[9px]"></i>
+                                            <span className="font-semibold">Info rekening belum diisi</span>
+                                        </div>
+                                    )}
                                 </div>
                                 {isExp&&<div className="border-t border-slate-100/80 divide-y divide-slate-50">{grp.sheets.sort((a,b)=>`${b.date}T${b.startTime}`.localeCompare(`${a.date}T${a.startTime}`)).map(ts=>{const isSel=uSel.has(ts.id);const sO=toDisplayTime(ts.startTime,ts.date,tz);const eO=ts.endTime?toDisplayTime(ts.endTime,ts.endDate||ts.date,tz):{time:'...'};return(
                                     <div key={ts.id} onClick={()=>toggleSheet(grp.uid,ts.id)} className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSel?'bg-blue-50/50':'hover:bg-slate-50'}`}>
@@ -1926,7 +1960,7 @@
             const [users, setUsers] = useState([]);
             const [schedules, setSch] = useState([]);
             const [timesheets, setTs] = useState([]);
-            const [sysSettings, setSys] = useState({ dailyQuotaHours:10, baseHourlyRateUSD:15, usdToIdr:16000 });
+            const [sysSettings, setSys] = useState({ dailyQuotaHours:10, baseHourlyRateUSD:15, usdToIdr:16000, _loaded:false });
             const [tz, setTz] = useState(tenant.defaultTimezone||'WIB');
 
             const isSA = session.role==='superadmin';
@@ -1940,7 +1974,7 @@
                 if (!tenant?.id) return; const un = [];
                 (async () => { try {
                     await window.fa.signInAnonymously(window.auth);
-                    un.push(window.fs.onSnapshot(window.fs.doc(window.db,'tenants',tenant.id), s=>{ if(s.exists()){const d=s.data();setTd({id:s.id,...d});if(d.settings)setSys(prev=>({...prev,...d.settings}));} }));
+                    un.push(window.fs.onSnapshot(window.fs.doc(window.db,'tenants',tenant.id), s=>{ if(s.exists()){const d=s.data();setTd({id:s.id,...d});setSys(prev=>({...prev,...(d.settings||{}),_loaded:true}));} }));
                     un.push(window.fs.onSnapshot(window.fs.query(window.fs.collection(window.db,'users'),window.fs.where('tenantId','==',tenant.id)), s=>setUsers(s.docs.map(d=>({id:d.id,...d.data()})))));
                     un.push(window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/schedules`), s=>setSch(s.docs.map(d=>({id:d.id,...d.data()})))));
                     un.push(window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/timesheets`), s=>setTs(s.docs.map(d=>({id:d.id,...d.data()})))));
