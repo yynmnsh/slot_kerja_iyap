@@ -1265,14 +1265,6 @@
 
             return (
                 <div className="space-y-4 stagger animate-fade-in">
-                    {/* Bank info reminder — subtle compact bar */}
-                    {me && !me.bankName && !me.accountNumber && (
-                        <button onClick={()=>setShowProfile(true)} className="w-full rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 p-3.5 flex items-center gap-3 hover:shadow-md transition-all active:scale-[0.99] group">
-                            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform"><i className="fas fa-credit-card text-amber-500 text-sm"></i></div>
-                            <div className="flex-1 text-left"><p className="text-xs font-bold text-amber-800">Isi Rekening Pembayaran</p><p className="text-[10px] text-amber-600/70 mt-0.5">Diperlukan untuk menerima pembayaran</p></div>
-                            <i className="fas fa-chevron-right text-amber-300 text-xs group-hover:translate-x-0.5 transition-transform"></i>
-                        </button>
-                    )}
                     {/* Welcome + Earnings */}
                     <div className="rounded-3xl p-5 text-white shadow-2xl relative overflow-hidden" style={{background:`linear-gradient(145deg, ${theme.primaryDark} 0%, ${theme.primary} 50%, ${theme.primaryLight}88 100%)`}}>
                         {/* Decorative circles */}
@@ -1510,7 +1502,16 @@
                             const eM=parseInt(eO.time.split(':')[0])*60+parseInt(eO.time.split(':')[1]);
                             const w=eM>sM?(eM-sM):0;
                             const dm=isTs?(parseInt(item.duration)||0):w;
-                            return{userId:item.userId,sM,w,sO,eO,dm};
+                            // Compute WIB and PT times for tooltip
+                            const sWIB=toDisplayTime(item.startTime,item.startDate||item.date,'WIB');
+                            let eWIB;
+                            if(isTs&&!item.endTime&&item.duration){const ep2=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d2=new Date(ep2+TZ_CONFIG.WIB.offsetUTC*3600000);eWIB={time:`${String(d2.getUTCHours()).padStart(2,'0')}:${String(d2.getUTCMinutes()).padStart(2,'0')}`};}
+                            else{eWIB=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'WIB');}
+                            const sPT=toDisplayTime(item.startTime,item.startDate||item.date,'PT');
+                            let ePT;
+                            if(isTs&&!item.endTime&&item.duration){const ep3=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d3=new Date(ep3+TZ_CONFIG.PT.offsetUTC*3600000);ePT={time:`${String(d3.getUTCHours()).padStart(2,'0')}:${String(d3.getUTCMinutes()).padStart(2,'0')}`};}
+                            else{ePT=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'PT');}
+                            return{userId:item.userId,sM,w,sO,eO,dm,wib:{s:sWIB.time,e:eWIB.time},pt:{s:sPT.time,e:ePT.time}};
                         };
                         const schBlocks=daySch.map(s=>({...toBlock(s,false),id:s.id}));
                         const tsBlocks=dayTs.map(t=>({...toBlock(t,true),id:t.id}));
@@ -1524,14 +1525,15 @@
                         const nowStr=`${String(noL.getUTCHours()).padStart(2,'0')}:${String(noL.getUTCMinutes()).padStart(2,'0')}`;
                         const isTodayMap=todayPtTs===tsPt;
                         const hasData=daySch.length>0||dayTs.length>0;
-                        const pctMatch=totalSchM>0?Math.min(100,Math.round(totalTsM/totalSchM*100)):totalTsM>0?100:0;
 
                         const Block=({b})=>{const ux=getUx(b.userId);const pctL=b.sM/1440*100;const pctW=Math.max(b.w/1440*100,1);const nm=ux.displayName||'?';const ini=nm.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);return(
                             <div className="absolute top-0.5 bottom-0.5 rounded flex items-center justify-center overflow-visible group cursor-default z-10 hover:z-40 transition-all duration-150 hover:brightness-110" style={{left:`${pctL}%`,width:`${pctW}%`,background:ux.color,opacity:0.9}}>
                                 <span className="text-[6px] font-bold text-white truncate px-0.5">{b.w>60?nm.split(' ')[0]:b.w>20?ini:''}</span>
-                                <div className={`hidden group-hover:flex absolute ${pctL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur-md text-white text-[10px] p-2 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-0.5 z-50 border border-white/10 pointer-events-none`}>
+                                <div className={`hidden group-hover:flex absolute ${pctL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur-md text-white text-[10px] p-2.5 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-1 z-50 border border-white/10 pointer-events-none`}>
                                     <div className="flex items-center gap-1.5 pb-1 border-b border-white/10"><div className="w-2 h-2 rounded-full" style={{background:ux.color}}></div><span className="font-bold text-[10px]">{ux.displayName}</span></div>
-                                    <span className="text-slate-300 font-mono text-[9px]">{b.sO.time}–{b.eO.time} · {fmtDuration(b.dm)}</span>
+                                    <div className="flex items-center gap-1.5"><span className="text-[8px] font-bold text-cyan-400 w-6">WIB</span><span className="text-slate-200 font-mono text-[9px]">{b.wib.s}–{b.wib.e}</span></div>
+                                    <div className="flex items-center gap-1.5"><span className="text-[8px] font-bold text-amber-400 w-6">PT</span><span className="text-slate-200 font-mono text-[9px]">{b.pt.s}–{b.pt.e}</span></div>
+                                    <div className="flex items-center gap-1.5 pt-0.5 border-t border-white/10 mt-0.5"><i className="fas fa-hourglass-half text-[7px] text-slate-500"></i><span className="text-slate-300 text-[9px]">{fmtDuration(b.dm)}</span></div>
                                 </div>
                             </div>);};
 
@@ -2038,9 +2040,8 @@
 
             const navTo = (id) => {
                 if (id === 'timesheet' && !hasBankInfo && !isAdm) {
-                    notify('Isi info rekening di ⚙ Pengaturan Akun (Beranda) untuk membuka Timesheet','warning');
-                    setView('dashboard');
-                    return;
+                    notify('Isi data rekening di ⚙ Pengaturan Akun (tab Beranda) untuk mengakses Timesheet','warning');
+                    return; // Stay on current tab — don't change view
                 }
                 setView(id);
             };
@@ -2069,7 +2070,14 @@
                             </div>
                         </div>
                     </header>
-                    <main className="max-w-2xl mx-auto px-4 py-5">
+                    {/* Timezone awareness bar */}
+                    <div className="max-w-2xl mx-auto px-4 mt-1.5 mb-0">
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-50/80 border border-amber-100/60">
+                            <i className="fas fa-globe-asia text-amber-400 text-[10px] flex-shrink-0"></i>
+                            <p className="text-[10px] text-amber-700/70">Zona waktu aktif: <b className="text-amber-800">{TZ_CONFIG[tz]?.short||tz}</b> — pastikan semua input waktu sesuai zona ini.</p>
+                        </div>
+                    </div>
+                    <main className="max-w-2xl mx-auto px-4 py-4">
                         <div key={view} className="animate-view-enter">
                             {view==='dashboard'&&<DashboardView session={session} td={td} users={users} schedules={schedules} timesheets={timesheets} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} notify={notify} tenant={tenant} logAct={logAct} />}
                             {view==='schedule'&&<ScheduleView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} logAct={logAct} />}
