@@ -1454,7 +1454,7 @@
                             <button onClick={()=>onNav('dashboard')} className="mt-3 inline-flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-all active:scale-95"><i className="fas fa-cog text-[10px]"></i>Buka Pengaturan Akun</button>
                         </div>
                     )}
-                    {canCreate && hasBankInfo && (<div className={`glass-strong rounded-2xl overflow-hidden ${editId?'ring-2 ring-orange-300':''}`} style={editId?{}:{borderTop:`3px solid #22c55e`}}>
+                    {canCreate && hasBankInfo && (<div className={`glass-strong rounded-2xl overflow-hidden ${editId?'ring-2 ring-orange-300':''}`} style={editId?{}:{borderTop:'3px solid #22c55e'}}>
                         <div className="px-5 pt-4 pb-3 border-b border-slate-100/80 flex justify-between items-center"><h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><span className={`w-7 h-7 rounded-lg flex items-center justify-center ${editId?'bg-orange-100':'bg-green-100'}`}><i className={`fas ${editId?'fa-pen':'fa-file-alt'} text-xs ${editId?'text-orange-600':'text-green-600'}`}></i></span>{editId?'Edit Laporan':'Kirim Laporan Kerja'}</h3>{(editId||isDirty)&&<button onClick={resetForm} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${editId?'text-red-500 bg-red-50 border-red-100':'text-slate-500 bg-slate-50 border-slate-200'}`}><i className={`fas ${editId?'fa-times':'fa-undo'} text-[9px]`}></i>{editId?'Batal':'Reset'}</button>}</div>
                         <form onSubmit={save} className="p-5 space-y-4" noValidate>
                             <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5 mb-2"><i className="fas fa-calendar-check text-blue-500 text-sm"></i>Pilih Jadwal</label>
@@ -1525,7 +1525,7 @@
                                 </div>
                                 <div className="relative w-full h-12 rounded-xl overflow-visible" style={{background:'linear-gradient(180deg, rgba(248,250,252,0.8), rgba(241,245,249,0.5))',border:'1px solid rgba(226,232,240,0.5)'}}>
                                     {/* Hour marks */}
-                                    <div className="absolute inset-0 flex pointer-events-none rounded-xl overflow-hidden">{Array.from({length:25},(_, h)=><div key={h} className={`h-full flex-shrink-0 ${h%6===0?'border-l border-slate-200/60':'h%3===0?border-l border-slate-100/40':''}`} style={{width:`${100/24}%`}}>{h%6===0&&<span className="text-[6px] font-mono text-slate-400 ml-0.5 mt-1 block font-semibold">{String(h).padStart(2,'0')}</span>}</div>)}</div>
+                                    <div className="absolute inset-0 flex pointer-events-none rounded-xl overflow-hidden">{Array.from({length:25},(_, h)=><div key={h} className={`h-full flex-shrink-0 ${h%6===0?'border-l border-slate-200/60':h%3===0?'border-l border-slate-100/40':''}`} style={{width:`${100/24}%`}}>{h%6===0&&<span className="text-[6px] font-mono text-slate-400 ml-0.5 mt-1 block font-semibold">{String(h).padStart(2,'0')}</span>}</div>)}</div>
                                     {blocks.filter(b=>b.w>0).map((b,i)=><Block key={i} b={b} variant={label==='Rencana'?'plan':'actual'} />)}
                                     <NowLine />
                                 </div>
