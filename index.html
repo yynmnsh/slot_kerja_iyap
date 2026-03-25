@@ -1502,17 +1502,23 @@
                     </div>)}
 
 
-                    {/* ═══ PETA VISUAL: JADWAL vs AKTUAL ═══ */}
+                    {/* ═══ PETA JADWAL HARIAN — per-user rows ═══ */}
                     {(()=>{
+                        // Always use PT for timeline positioning (PT day boundary = the work day)
+                        const ptOff=TZ_CONFIG.PT.offsetUTC;
+                        const toPtMin=(dateStr,timeStr)=>{
+                            const ep=getEpochFromWIB(dateStr,timeStr);
+                            const d=new Date(ep+ptOff*3600000);
+                            return d.getUTCHours()*60+d.getUTCMinutes();
+                        };
+                        // Filter schedules for this PT day (including cross-midnight spill)
                         const daySch=schedules.filter(s=>{
                             const pt=getPSTDay(s.startDate||s.date,s.startTime);
                             if(pt===tsPt) return true;
-                            // Also include if crosses midnight into tsPt
                             const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);
                             let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);
                             if(!s.endDate&&eE<=sE)eE+=86400000;
-                            if(eE>sE&&addDays(pt,1)===tsPt) return true;
-                            return false;
+                            return eE>sE&&addDays(pt,1)===tsPt;
                         });
                         const dayTs=timesheets.filter(ts=>{
                             const pt=getPSTDay(ts.date,ts.startTime);
@@ -1521,129 +1527,130 @@
                             let eE2=sE2;
                             if(ts.endTime){eE2=getEpochFromWIB(ts.endDate||ts.date,ts.endTime);if(eE2<=sE2)eE2+=86400000;}
                             else if(ts.duration){eE2=sE2+ts.duration*60000;}
-                            if(eE2>sE2&&addDays(pt,1)===tsPt) return true;
-                            return false;
+                            return eE2>sE2&&addDays(pt,1)===tsPt;
                         });
-                        const toBlock=(item,isTs)=>{
-                            const ptDay=getPSTDay(isTs?(item.date):(item.startDate||item.date),item.startTime);
-                            const spillsIn=ptDay!==tsPt&&addDays(ptDay,1)===tsPt;
-                            const sO=toDisplayTime(item.startTime,item.startDate||item.date,tz);
-                            let eO;
-                            if(isTs&&!item.endTime&&item.duration){const ep=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d=new Date(ep+TZ_CONFIG[tz].offsetUTC*3600000);eO={time:`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`};}
-                            else{eO=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,tz);}
-                            let sM=parseInt(sO.time.split(':')[0])*60+parseInt(sO.time.split(':')[1]);
-                            let eM=parseInt(eO.time.split(':')[0])*60+parseInt(eO.time.split(':')[1]);
+                        // Build blocks in PT minutes
+                        const mkBlock=(item,isTs)=>{
+                            const ptDay=getPSTDay(isTs?item.date:(item.startDate||item.date),item.startTime);
+                            const spillsIn=ptDay!==tsPt;
+                            let sM=toPtMin(item.startDate||item.date,item.startTime);
+                            let eM;
+                            if(isTs&&!item.endTime&&item.duration){
+                                const ep=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;
+                                const d=new Date(ep+ptOff*3600000);
+                                eM=d.getUTCHours()*60+d.getUTCMinutes();
+                            } else {
+                                eM=toPtMin(item.endDate||item.endDate||item.startDate||item.date,item.endTime||item.startTime);
+                            }
                             let w;
-                            if(spillsIn){
-                                // This block started yesterday, show 00:00 to endTime on this day
-                                sM=0; w=eM;
-                            } else if(eM>sM){
-                                w=eM-sM;
-                            } else if(eM<sM){
-                                // Crosses midnight — show start to 24:00 on this day
-                                w=1440-sM;
-                            } else { w=0; }
-                            const dm=isTs?(parseInt(item.duration)||0):(w>0?w:0);
-                            // Dual timezone
+                            if(spillsIn){sM=0;w=eM;}
+                            else if(eM>sM){w=eM-sM;}
+                            else if(eM<sM){w=1440-sM;}
+                            else{w=0;}
+                            const dm=isTs?(parseInt(item.duration)||0):w;
+                            // Display times in both zones
                             const sWIB=toDisplayTime(item.startTime,item.startDate||item.date,'WIB');
-                            let eWIB;
-                            if(isTs&&!item.endTime&&item.duration){const ep2=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d2=new Date(ep2+TZ_CONFIG.WIB.offsetUTC*3600000);eWIB={time:`${String(d2.getUTCHours()).padStart(2,'0')}:${String(d2.getUTCMinutes()).padStart(2,'0')}`};}
-                            else{eWIB=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'WIB');}
-                            const sPT=toDisplayTime(item.startTime,item.startDate||item.date,'PT');
-                            let ePT;
-                            if(isTs&&!item.endTime&&item.duration){const ep3=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d3=new Date(ep3+TZ_CONFIG.PT.offsetUTC*3600000);ePT={time:`${String(d3.getUTCHours()).padStart(2,'0')}:${String(d3.getUTCMinutes()).padStart(2,'0')}`};}
-                            else{ePT=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'PT');}
-                            return{userId:item.userId,sM,w,sO,eO,dm,wib:{s:sWIB.time,e:eWIB.time},pt:{s:sPT.time,e:ePT.time}};
+                            const sPT2=toDisplayTime(item.startTime,item.startDate||item.date,'PT');
+                            let eWIB,ePT2;
+                            if(isTs&&!item.endTime&&item.duration){
+                                const ep2=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;
+                                const dw=new Date(ep2+TZ_CONFIG.WIB.offsetUTC*3600000);
+                                eWIB={time:`${String(dw.getUTCHours()).padStart(2,'0')}:${String(dw.getUTCMinutes()).padStart(2,'0')}`};
+                                const dp=new Date(ep2+ptOff*3600000);
+                                ePT2={time:`${String(dp.getUTCHours()).padStart(2,'0')}:${String(dp.getUTCMinutes()).padStart(2,'0')}`};
+                            } else {
+                                eWIB=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'WIB');
+                                ePT2=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'PT');
+                            }
+                            return{userId:item.userId,sM,w,dm,wib:{s:sWIB.time,e:eWIB.time},pt:{s:sPT2.time,e:ePT2.time}};
                         };
-                        const schBlocks=daySch.map(s=>({...toBlock(s,false),id:s.id}));
-                        const tsBlocks=dayTs.map(t=>({...toBlock(t,true),id:t.id}));
-                        const getUx=(uid)=>users.find(u=>u.id===uid)||{displayName:'?',color:'#94a3b8'};
-                        const totalSchM=daySch.reduce((a,s)=>{const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);if(!s.endDate&&eE<=sE)eE+=86400000;return a+Math.round((eE-sE)/60000);},0);
-                        const totalTsM=dayTs.reduce((a,t)=>a+parseInt(t.duration||0),0);
-                        const diff=totalTsM-totalSchM;
-                        const noL=new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000);
-                        const nowMin=noL.getUTCHours()*60+noL.getUTCMinutes();
-                        const nowPct=nowMin/1440*100;
-                        const nowStr=`${String(noL.getUTCHours()).padStart(2,'0')}:${String(noL.getUTCMinutes()).padStart(2,'0')}`;
-                        const isTodayMap=todayPtTs===tsPt;
+                        const schB=daySch.map(s=>({...mkBlock(s,false),id:s.id}));
+                        const tsB=dayTs.map(t=>({...mkBlock(t,true),id:t.id}));
+                        const getUx=uid=>users.find(u=>u.id===uid)||{displayName:'?',color:'#94a3b8'};
+                        const totalActM=dayTs.reduce((a,t)=>a+parseInt(t.duration||0),0);
                         const hasData=daySch.length>0||dayTs.length>0;
-
-                        const Block=({b})=>{const ux=getUx(b.userId);const pctL=b.sM/1440*100;const pctW=Math.max(b.w/1440*100,1);const nm=ux.displayName||'?';const ini=nm.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);return(
-                            <div className="absolute top-0.5 bottom-0.5 rounded flex items-center justify-center overflow-visible group cursor-default z-10 hover:z-40 transition-all duration-150 hover:brightness-110" style={{left:`${pctL}%`,width:`${pctW}%`,background:ux.color,opacity:0.9}}>
-                                <span className="text-[6px] font-bold text-white truncate px-0.5">{b.w>60?nm.split(' ')[0]:b.w>20?ini:''}</span>
-                                <div className={`hidden group-hover:flex absolute ${pctL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur-md text-white text-[10px] p-2.5 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-1 z-50 border border-white/10 pointer-events-none`}>
-                                    <div className="flex items-center gap-1.5 pb-1 border-b border-white/10"><div className="w-2 h-2 rounded-full" style={{background:ux.color}}></div><span className="font-bold text-[10px]">{ux.displayName}</span></div>
-                                    <div className="flex items-center gap-1.5"><span className="text-[8px] font-bold text-cyan-400 w-6">WIB</span><span className="text-slate-200 font-mono text-[9px]">{b.wib.s}–{b.wib.e}</span></div>
-                                    <div className="flex items-center gap-1.5"><span className="text-[8px] font-bold text-amber-400 w-6">PT</span><span className="text-slate-200 font-mono text-[9px]">{b.pt.s}–{b.pt.e}</span></div>
-                                    <div className="flex items-center gap-1.5 pt-0.5 border-t border-white/10 mt-0.5"><i className="fas fa-hourglass-half text-[7px] text-slate-500"></i><span className="text-slate-300 text-[9px]">{fmtDuration(b.dm)}</span></div>
+                        // Group by user
+                        const userIds=[...new Set([...schB.map(b=>b.userId),...tsB.map(b=>b.userId)])];
+                        // NowLine in PT
+                        const noP=new Date(Date.now()+ptOff*3600000);
+                        const nowPtM=noP.getUTCHours()*60+noP.getUTCMinutes();
+                        const nowPct2=nowPtM/1440*100;
+                        const nowWIB=(()=>{const d=new Date(Date.now()+TZ_CONFIG.WIB.offsetUTC*3600000);return`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;})();
+                        const nowPTstr=`${String(noP.getUTCHours()).padStart(2,'0')}:${String(noP.getUTCMinutes()).padStart(2,'0')}`;
+                        const isTodayMap=todayPtTs===tsPt;
+                        // Tooltip for blocks
+                        const BlkTip=({b,isSch})=>{const ux=getUx(b.userId);const pL=b.sM/1440*100;const pW=Math.max(b.w/1440*100,0.8);return(
+                            <div className={`absolute top-0 bottom-0 rounded-[3px] flex items-center justify-center overflow-visible group cursor-default z-10 hover:z-40 border transition-all hover:brightness-105 ${isSch?'border-transparent':'border-white/40'}`} style={{left:`${pL}%`,width:`${pW}%`,background:isSch?ux.color+'cc':ux.color,opacity:isSch?0.45:0.85}}>
+                                {b.w>50&&<span className="text-[6px] font-bold text-white truncate px-0.5">{(ux.displayName||'').split(' ')[0]}</span>}
+                                <div className={`hidden group-hover:flex absolute ${pL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur text-white text-[10px] p-2 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-0.5 z-50 border border-white/10 pointer-events-none`}>
+                                    <div className="flex items-center gap-1.5 pb-1 border-b border-white/10"><div className="w-2 h-2 rounded-full" style={{background:ux.color}}></div><b>{ux.displayName}</b></div>
+                                    <span className="text-slate-300 text-[9px]"><b className="text-cyan-400 w-7 inline-block">WIB</b>{b.wib.s}–{b.wib.e}</span>
+                                    <span className="text-slate-300 text-[9px]"><b className="text-amber-400 w-7 inline-block">PT</b>{b.pt.s}–{b.pt.e}</span>
+                                    <span className="text-slate-400 text-[8px] pt-0.5 border-t border-white/10 mt-0.5">{fmtDuration(b.dm)} · {isSch?'Jadwal':'Laporan'}</span>
                                 </div>
                             </div>);};
-
                         return(
-                        <div className="rounded-2xl overflow-hidden" style={{background:'rgba(255,255,255,0.95)',border:'1px solid rgba(226,232,240,0.4)',boxShadow:'0 2px 12px rgba(0,0,0,0.04)'}}>
-                            {/* Header */}
+                        <div className="rounded-2xl overflow-hidden" style={{background:'rgba(255,255,255,0.97)',border:'1px solid rgba(226,232,240,0.5)',boxShadow:'0 2px 12px rgba(0,0,0,0.04)'}}>
                             <div className="px-4 py-2.5 flex items-center justify-between" style={{background:`linear-gradient(135deg, ${theme.primaryDark}, ${theme.primary})`}}>
-                                <h3 className="text-[13px] font-bold text-white flex items-center gap-2"><i className="fas fa-chart-gantt"></i>Jadwal vs Aktual</h3>
+                                <div><h3 className="text-[13px] font-bold text-white flex items-center gap-2"><i className="fas fa-map"></i>Peta Jadwal Harian</h3>
+                                <p className="text-white/40 text-[9px] mt-0.5">Atas = Dijadwalkan · Bawah = Dilaporkan</p></div>
                                 <div className="flex items-center gap-0.5 bg-white/10 rounded-xl p-0.5 border border-white/10">
                                     <button onClick={()=>shiftTsPt(-1)} className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all active:scale-90"><i className="fas fa-chevron-left text-[10px]"></i></button>
                                     <button onClick={()=>setTsPt(todayPtTs)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[64px] text-center transition-all ${tsPt===todayPtTs?'bg-white shadow-md':'text-white/80 hover:bg-white/15'}`} style={tsPt===todayPtTs?{color:theme.primary}:{}}>{tsPt===todayPtTs?'Hari Ini':formatDateShort(tsPt)}</button>
                                     <button onClick={()=>shiftTsPt(1)} className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all active:scale-90"><i className="fas fa-chevron-right text-[10px]"></i></button>
                                 </div>
                             </div>
+                            <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
+                                <i className="fas fa-info-circle text-blue-400 text-[9px]"></i>
+                                <span className="text-[9px] text-slate-500">Batas hari kerja menggunakan <b>PT (Pacific Time)</b> — 00:00–23:59 PT — terlepas dari zona tampilan.</span>
+                            </div>
                             {hasData?(
-                            <div className="p-4 space-y-3">
-                                {/* PT day label */}
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">Hari kerja PT: {tsPt}</span>
-                                    <span className="text-[9px] text-slate-400">Zona tampilan: {TZ_CONFIG[tz]?.short}</span>
+                            <div className="p-3">
+                                {/* Stats */}
+                                <div className="grid grid-cols-3 gap-2 mb-3">
+                                    <div className="text-center py-2"><p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Dijadwalkan</p><p className="text-lg font-black text-slate-800">{daySch.length}</p></div>
+                                    <div className="text-center py-2"><p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Dilaporkan</p><p className="text-lg font-black text-slate-800">{dayTs.length}</p></div>
+                                    <div className="text-center py-2"><p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Jam Aktual</p><p className="text-lg font-black text-slate-800">{(totalActM/60).toFixed(1)}<span className="text-sm font-normal text-slate-400">j</span></p></div>
                                 </div>
-                                {/* Stats row */}
-                                <div className="grid grid-cols-3 gap-2">
-                                    <div className="text-center p-2 rounded-xl bg-blue-50/70 border border-blue-100/50">
-                                        <p className="text-[7px] font-bold text-blue-400 uppercase tracking-widest">Rencana</p>
-                                        <p className="text-sm font-black text-blue-700 tabular-nums">{fmtDuration(totalSchM)}</p>
-                                    </div>
-                                    <div className="text-center p-2 rounded-xl bg-emerald-50/70 border border-emerald-100/50">
-                                        <p className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">Aktual</p>
-                                        <p className="text-sm font-black text-emerald-700 tabular-nums">{fmtDuration(totalTsM)}</p>
-                                    </div>
-                                    <div className="text-center p-2 rounded-xl border" style={{background:diff>=0?'rgba(16,185,129,0.05)':'rgba(245,158,11,0.05)',borderColor:diff>=0?'rgba(16,185,129,0.12)':'rgba(245,158,11,0.12)'}}>
-                                        <p className="text-[7px] font-bold uppercase tracking-widest" style={{color:diff>=0?'#10b981':'#f59e0b'}}>Selisih</p>
-                                        <p className={`text-sm font-black tabular-nums ${diff>=0?'text-emerald-700':'text-amber-700'}`}>{diff>=0?'+':''}{fmtDuration(Math.abs(diff))}</p>
-                                    </div>
+                                {/* Hour header */}
+                                <div className="relative ml-16">
+                                    <div className="flex justify-between text-[7px] font-mono text-slate-400 font-bold mb-1 pr-px">{[0,4,8,12,16,20,24].map(h=><span key={h}>{String(h).padStart(2,'0')}</span>)}</div>
                                 </div>
-                                {/* UNIFIED dual timeline — single NowLine spanning both */}
-                                <div className="relative rounded-xl overflow-visible bg-slate-50/50 border border-slate-100/60">
-                                    {/* Hour marks shared across both rows */}
-                                    <div className="absolute inset-0 flex pointer-events-none rounded-xl overflow-hidden z-0">{Array.from({length:25},(_, h)=><div key={h} className={`h-full flex-shrink-0 ${h%6===0?'border-l border-slate-200/50':h%3===0?'border-l border-slate-100/30':''}`} style={{width:`${100/24}%`}}>{h%6===0&&<span className="text-[5px] font-mono text-slate-300 ml-0.5 mt-0.5 block">{String(h).padStart(2,'0')}</span>}</div>)}</div>
-                                    {/* Rencana row */}
-                                    <div className="relative h-8 border-b border-slate-200/40">
-                                        <span className="absolute left-1 bottom-0.5 text-[6px] font-bold text-blue-400 uppercase z-[5] pointer-events-none opacity-60">Rencana</span>
-                                        {schBlocks.filter(b=>b.w>0).map((b,i)=><Block key={'s'+i} b={b} />)}
-                                    </div>
-                                    {/* Aktual row */}
-                                    <div className="relative h-8">
-                                        <span className="absolute left-1 bottom-0.5 text-[6px] font-bold text-emerald-400 uppercase z-[5] pointer-events-none opacity-60">Aktual</span>
-                                        {tsBlocks.filter(b=>b.w>0).map((b,i)=><Block key={'a'+i} b={b} />)}
-                                    </div>
-                                    {/* Single NowLine spanning both rows — hover only */}
-                                    {isTodayMap&&(
-                                        <div className="absolute top-0 bottom-0 z-20" style={{left:`${nowPct}%`}}>
-                                            <div className="absolute top-0 bottom-0 w-px bg-red-500 pointer-events-none" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
-                                            <div className="absolute -top-1 w-2 h-2 bg-red-500 rounded-full pointer-events-none" style={{left:'50%',transform:'translateX(-50%)'}}></div>
-                                            <div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{width:'16px',transform:'translateX(-8px)'}}>
-                                                <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 -top-5 bg-red-600 text-white text-[8px] font-bold px-2 py-0.5 rounded-lg shadow-lg whitespace-nowrap">{nowStr} {TZ_CONFIG[tz]?.short}</div>
+                                {/* Per-user rows */}
+                                <div className="relative">
+                                    {userIds.map(uid=>{const ux=getUx(uid);const uSch=schB.filter(b=>b.userId===uid&&b.w>0);const uTs=tsB.filter(b=>b.userId===uid&&b.w>0);return(
+                                        <div key={uid} className="flex items-stretch border-b border-slate-100/60 last:border-0">
+                                            <div className="w-16 flex-shrink-0 flex items-center gap-1.5 py-1.5 pr-2">
+                                                <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{background:ux.color}}></div>
+                                                <span className="text-[9px] font-bold text-slate-600 truncate leading-tight">{ux.displayName}</span>
+                                            </div>
+                                            <div className="flex-1 relative min-w-0">
+                                                <div className="relative h-4 border-b border-dashed border-slate-100/50">
+                                                    {uSch.map((b,i)=><BlkTip key={'s'+i} b={b} isSch={true} />)}
+                                                </div>
+                                                <div className="relative h-4">
+                                                    {uTs.map((b,i)=><BlkTip key={'a'+i} b={b} isSch={false} />)}
+                                                </div>
                                             </div>
                                         </div>
-                                    )}
+                                    );})}
+                                    {/* Grid lines over timeline area */}
+                                    <div className="absolute top-0 bottom-0 left-16 right-0 flex pointer-events-none z-0">{Array.from({length:25},(_,h)=><div key={h} className={`h-full flex-shrink-0 ${h%4===0?'border-l border-slate-200/30':''}`} style={{width:`${100/24}%`}}></div>)}</div>
+                                    {/* NowLine over timeline area */}
+                                    {isTodayMap&&<div className="absolute top-0 bottom-0 pointer-events-none z-20" style={{left:`calc(64px + (100% - 64px) * ${nowPct2/100})`}}>
+                                        <div className="absolute top-0 bottom-0 w-px bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
+                                    </div>}
                                 </div>
+                                {/* NowLine hover dot below rows */}
+                                {isTodayMap&&<div className="relative ml-16 mt-1">
+                                    <div className="absolute z-20 group cursor-default" style={{left:`${nowPct2}%`,transform:'translateX(-50%)'}}>
+                                        <div className="w-2.5 h-2.5 bg-red-500 rounded-full mx-auto shadow-sm shadow-red-200"></div>
+                                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 top-4 bg-red-600 text-white text-[8px] font-bold px-2.5 py-1 rounded-lg shadow-lg whitespace-nowrap z-50">WIB {nowWIB} · PT {nowPTstr}</div>
+                                    </div>
+                                </div>}
                             </div>
                             ):(
-                            <div className="px-4 py-8 text-center">
-                                <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-slate-50 border border-dashed border-slate-200"><i className="fas fa-calendar-xmark text-slate-300 text-lg"></i></div>
-                                <p className="text-sm font-semibold text-slate-400">Tidak ada data</p>
-                                <p className="text-[10px] text-slate-300 mt-1">Gunakan ◀ ▶ untuk berpindah hari</p>
-                            </div>
+                            <div className="px-4 py-8 text-center"><div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-slate-50 border border-dashed border-slate-200"><i className="fas fa-calendar-xmark text-slate-300 text-lg"></i></div><p className="text-sm font-semibold text-slate-400">Tidak ada data</p><p className="text-[10px] text-slate-300 mt-1">Gunakan ◀ ▶ untuk berpindah hari</p></div>
                             )}
                         </div>);
                     })()}
@@ -1674,44 +1681,22 @@
            RECEIPT PRINTER — shared by Analytics & Admin
            ═══════════════════════════════════════════════ */
         const printReceipt = (data) => {
-            const { appName, userName, paidDate, sheets, totalAmt, totalMins, xRate, tz, bankName, accountNumber, accountHolder } = data;
+            // data can have: single user {userName, sheets, ...} OR multi-user {users: [{userName, sheets, bankName, ...}]}
+            const { appName, paidDate, xRate } = data;
             const fmtIDR = n => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
-            const rows = sheets.map(ts => {
-                const dm = parseInt(ts.duration||0);
-                const amt = (parseFloat(ts.paymentUSD||0))*xRate;
-                return `<tr><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px">${ts.date}</td><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;font-family:monospace">${ts.startTime||'-'}–${ts.endTime||'-'}</td><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;text-align:center">${Math.floor(dm/60)}j ${dm%60}m</td><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;text-align:right;font-weight:700">${fmtIDR(amt)}</td></tr>`;
+            const fmtD = m => {const h=Math.floor(m/60);const mn=m%60;return h>0?(mn>0?h+'j '+mn+'m':h+'j'):mn+'m';};
+            const userSections = data.users ? data.users : [{userName:data.userName,sheets:data.sheets,totalAmt:data.totalAmt,totalMins:data.totalMins,bankName:data.bankName,accountNumber:data.accountNumber,accountHolder:data.accountHolder}];
+            const grandTotal = userSections.reduce((a,u)=>a+u.totalAmt,0);
+            const grandMins = userSections.reduce((a,u)=>a+u.totalMins,0);
+            const multiUser = userSections.length > 1;
+            const userBlocks = userSections.map(u => {
+                const rows = u.sheets.map(ts => {
+                    const dm=parseInt(ts.duration||0);const amt=(parseFloat(ts.paymentUSD||0))*xRate;
+                    return '<tr><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:11px">'+ts.date+'</td><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;font-family:monospace">'+(ts.startTime||'-')+'–'+(ts.endTime||'-')+'</td><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;text-align:center">'+fmtD(dm)+'</td><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;text-align:right;font-weight:700">'+fmtIDR(amt)+'</td></tr>';
+                }).join('');
+                return '<div style="margin-bottom:20px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden"><div style="background:#f8fafc;padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center"><div><div style="font-weight:800;font-size:14px;color:#1e293b">'+u.userName+'</div>'+(u.bankName?'<div style="font-size:11px;color:#64748b;margin-top:2px">'+u.bankName+' · '+u.accountNumber+(u.accountHolder?' · a.n. '+u.accountHolder:'')+'</div>':'<div style="font-size:11px;color:#f59e0b">⚠ Info rekening belum diisi</div>')+'</div><div style="text-align:right"><div style="font-size:16px;font-weight:900;color:#047857">'+fmtIDR(u.totalAmt)+'</div><div style="font-size:10px;color:#64748b">'+fmtD(u.totalMins)+'</div></div></div><table style="width:100%;border-collapse:collapse"><thead><tr><th style="background:#f8fafc;padding:6px 8px;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;font-weight:700;text-align:left">Tanggal</th><th style="background:#f8fafc;padding:6px 8px;font-size:9px;text-transform:uppercase;color:#64748b;font-weight:700;text-align:left">Waktu</th><th style="background:#f8fafc;padding:6px 8px;font-size:9px;text-transform:uppercase;color:#64748b;font-weight:700;text-align:center">Durasi</th><th style="background:#f8fafc;padding:6px 8px;font-size:9px;text-transform:uppercase;color:#64748b;font-weight:700;text-align:right">Jumlah</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
             }).join('');
-            const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Resi Pembayaran</title><style>@media print{.no-print{display:none!important}}body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;padding:20px;color:#1e293b;font-size:13px}
-            .container{max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}
-            .header{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:24px;text-align:center}
-            .header h1{margin:0;font-size:18px;font-weight:800}.header p{margin:4px 0 0;opacity:0.7;font-size:12px}
-            .body{padding:20px}.section{margin-bottom:16px}.label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#64748b;font-weight:700;margin-bottom:4px}
-            .value{font-size:13px;font-weight:600;color:#1e293b}table{width:100%;border-collapse:collapse;margin-top:8px}
-            th{background:#f8fafc;padding:8px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;font-weight:700;text-align:left;border-bottom:2px solid #e2e8f0}
-            .total-row{background:#f0fdf4;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-top:2px solid #e2e8f0}
-            .total-label{font-size:12px;font-weight:700;color:#059669}.total-amt{font-size:20px;font-weight:900;color:#047857}
-            .footer{text-align:center;padding:12px;font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9}
-            .btn{display:inline-block;padding:10px 24px;background:#2563eb;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;margin:8px 4px}
-            .btn:hover{background:#1d4ed8}.btn-outline{background:white;color:#2563eb;border:2px solid #2563eb}.btn-outline:hover{background:#eff6ff}</style></head>
-            <body><div class="container">
-            <div class="header"><h1>${appName||'Scheduler'}</h1><p>Resi Pembayaran</p></div>
-            <div class="body">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-            <div class="section"><div class="label">Penerima</div><div class="value">${userName}</div></div>
-            <div class="section"><div class="label">Tanggal Bayar</div><div class="value">${paidDate}</div></div>
-            ${bankName?`<div class="section"><div class="label">Rekening</div><div class="value">${bankName} · ${accountNumber||'-'}</div>${accountHolder?`<div style="font-size:11px;color:#64748b">a.n. ${accountHolder}</div>`:''}</div>`:''}
-            <div class="section"><div class="label">Total Jam Kerja</div><div class="value">${Math.floor(totalMins/60)}j ${totalMins%60}m</div></div>
-            </div>
-            <div class="label" style="margin-bottom:8px">Rincian Laporan Kerja</div>
-            <table><thead><tr><th>Tanggal</th><th>Waktu</th><th style="text-align:center">Durasi</th><th style="text-align:right">Jumlah</th></tr></thead><tbody>${rows}</tbody></table>
-            </div>
-            <div class="total-row"><span class="total-label">TOTAL PEMBAYARAN</span><span class="total-amt">${fmtIDR(totalAmt)}</span></div>
-            <div class="footer">Dokumen ini dibuat otomatis oleh ${appName||'Scheduler'}</div>
-            </div>
-            <div style="text-align:center;margin-top:16px" class="no-print">
-            <button class="btn" onclick="window.print()"><span style="margin-right:6px">🖨</span>Cetak / Simpan PDF</button>
-            <button class="btn btn-outline" onclick="window.close()">Tutup</button>
-            </div></body></html>`;
+            const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Resi Pembayaran</title><style>@media print{.no-print{display:none!important}}body{font-family:Segoe UI,system-ui,sans-serif;margin:0;padding:20px;color:#1e293b;font-size:13px}.container{max-width:640px;margin:0 auto}.header{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:24px;text-align:center;border-radius:12px 12px 0 0}.header h1{margin:0;font-size:18px;font-weight:800}.header p{margin:4px 0 0;opacity:0.7;font-size:12px}.body{padding:20px;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 12px 12px}.total-row{background:#f0fdf4;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-top:2px solid #d1fae5;margin:0 -20px;margin-bottom:-20px;border-radius:0 0 12px 12px}.btn{display:inline-block;padding:10px 24px;background:#2563eb;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;margin:8px 4px}.btn:hover{background:#1d4ed8}.btn-outline{background:white;color:#2563eb;border:2px solid #2563eb}</style></head><body><div class="container"><div class="header"><h1>'+(appName||'Scheduler')+'</h1><p>Resi Pembayaran'+(multiUser?' — '+userSections.length+' Penerima':'')+'</p></div><div class="body"><div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#64748b;font-weight:700">Tanggal Bayar</div><div style="font-size:14px;font-weight:700">'+paidDate+'</div></div><div style="text-align:right"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#64748b;font-weight:700">Total</div><div style="font-size:14px;font-weight:700">'+fmtIDR(grandTotal)+'</div></div></div>'+userBlocks+'<div class="total-row"><span style="font-size:13px;font-weight:700;color:#059669">TOTAL PEMBAYARAN'+(multiUser?' ('+userSections.length+' orang)':'')+'</span><span style="font-size:22px;font-weight:900;color:#047857">'+fmtIDR(grandTotal)+'</span></div></div></div><div style="text-align:center;margin-top:16px" class="no-print"><button class="btn" onclick="window.print()">🖨 Cetak / Simpan PDF</button><button class="btn btn-outline" onclick="window.close()">Tutup</button></div></body></html>';
             const w = window.open('', '_blank', 'width=700,height=900');
             if (w) { w.document.write(html); w.document.close(); }
         };
@@ -1951,6 +1936,51 @@
                             {hasSel&&<div className="px-4 pb-4 pt-3 border-t border-white/10"><button onClick={()=>markPaid(allSelSheets.map(s=>s.id))} disabled={busy} className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50">{busy?<i className="fas fa-spinner fa-spin"></i>:<i className="fas fa-check-circle"></i>}Tandai Dibayar <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px]">{allSelSheets.length} · {fmtC(selTotal)}</span></button></div>}
                             {!hasSel&&pendSh.length>0&&<div className="px-4 pb-3 pt-1"><p className="text-center text-[11px] text-slate-500 italic"><i className="fas fa-hand-point-down mr-1"></i>Pilih laporan di bawah</p></div>}
                         </div>
+                        {/* Fee allocation from surplus kurs */}
+                        {(()=>{
+                            const allocs=sysSettings?.feeAllocations||[];
+                            const baseK=sysSettings?.usdToIdr||16000;
+                            const actK=sysSettings?.actualKurs||baseK;
+                            const surplus=actK-baseK;
+                            if(surplus<=0||allocs.length===0) return null;
+                            const baseRate2=sysSettings?.baseHourlyRateUSD||15;
+                            const surplusPerHr=surplus*baseRate2;
+                            const totalPendHrs=pendSh.reduce((a,ts)=>a+parseInt(ts.duration||0),0)/60;
+                            const selHrs=selMins/60;
+                            return(
+                            <div className="glass-strong rounded-2xl border border-violet-200/50 overflow-hidden">
+                                <div className="px-4 py-3 bg-violet-50/50 border-b border-violet-100/50 flex items-center justify-between">
+                                    <div><h4 className="text-xs font-bold text-violet-800 flex items-center gap-1.5"><i className="fas fa-wallet text-violet-500 text-[10px]"></i>Alokasi Selisih Kurs</h4><p className="text-[9px] text-violet-500 mt-0.5">Rp{surplus.toLocaleString('id-ID')}/USD × ${baseRate2}/jam = Rp{surplusPerHr.toLocaleString('id-ID')}/jam</p></div>
+                                </div>
+                                <div className="divide-y divide-violet-50">
+                                    {allocs.map((al,i)=>{
+                                        const perHr=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);
+                                        const totalAll=Math.round(perHr*totalPendHrs);
+                                        const totalSel=Math.round(perHr*selHrs);
+                                        return(
+                                        <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                                            <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0"><i className="fas fa-piggy-bank text-violet-500 text-xs"></i></div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-bold text-slate-700">{al.name||'Kantong '+(i+1)}</p>
+                                                <p className="text-[9px] text-slate-400">Rp{Math.round(perHr).toLocaleString('id-ID')}/jam · {al.type==='percent'?al.value+'%':'tetap'}</p>
+                                            </div>
+                                            <div className="text-right flex-shrink-0">
+                                                <p className="text-xs font-black text-violet-700">Rp{totalAll.toLocaleString('id-ID')}</p>
+                                                <p className="text-[9px] text-slate-400">{totalPendHrs.toFixed(1)}j total</p>
+                                                {hasSel&&<p className="text-[9px] text-violet-500 font-bold">Dipilih: Rp{totalSel.toLocaleString('id-ID')} ({selHrs.toFixed(1)}j)</p>}
+                                            </div>
+                                        </div>);
+                                    })}
+                                    <div className="flex items-center justify-between px-4 py-2.5 bg-violet-50/30">
+                                        <span className="text-[10px] font-bold text-violet-600">Total Alokasi</span>
+                                        <div className="text-right">
+                                            <span className="text-xs font-black text-violet-700">Rp{Math.round(allocs.reduce((a,al)=>{const p=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return a+p*totalPendHrs;},0)).toLocaleString('id-ID')}</span>
+                                            {hasSel&&<p className="text-[9px] text-violet-500 font-bold">Dipilih: Rp{Math.round(allocs.reduce((a,al)=>{const p=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return a+p*selHrs;},0)).toLocaleString('id-ID')}</p>}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>);
+                        })()}
                         {pendSh.length===0?<div className="glass-strong rounded-2xl border border-white/50 p-10 text-center"><i className="fas fa-check-circle text-3xl text-slate-200 mb-3 block"></i><p className="text-slate-400 text-sm">Tidak ada tagihan pending</p></div>:
                         pendByUser.map(grp=>{const u=getU(grp.uid);const uFull=users.find(x=>x.id===grp.uid);const uSel=selectedSheets[grp.uid]||new Set();const allSel=grp.sheets.every(s=>uSel.has(s.id));const someSel=grp.sheets.some(s=>uSel.has(s.id));const isExp=expandedUsers[grp.uid]!==false;const selCount=[...uSel].filter(id=>grp.sheets.some(s=>s.id===id)).length;const selAmt=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+getAmt(s),0);const selMinsU=grp.sheets.filter(s=>uSel.has(s.id)).reduce((a,s)=>a+parseInt(s.duration||0),0);const hasBank=uFull?.bankName&&uFull?.accountNumber;return(
                             <div key={grp.uid} className="glass-strong rounded-2xl border overflow-hidden" style={{borderColor:someSel?u.color+'55':'rgba(148,163,184,0.2)'}}>
@@ -1998,6 +2028,7 @@
                                 <div onClick={()=>setExpU(p=>({...p,['b_'+bk]:!isBExp}))} className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50/50 transition-colors">
                                     <div className="w-9 h-9 rounded-xl bg-emerald-100 flex-shrink-0 flex flex-col items-center justify-center"><span className="text-[8px] font-bold text-emerald-500 uppercase">{new Date(bk+'T00:00:00').toLocaleDateString('id-ID',{month:'short'})}</span><span className="text-sm font-black text-emerald-700">{bk.slice(8)}</span></div>
                                     <div className="flex-1 min-w-0"><p className="text-xs font-black text-slate-700">Dibayar {formatDateShort(bk)}</p><p className="text-[10px] text-slate-400 mt-0.5">{Object.keys(batch.byUser).length} orang · {batch.sheets.length} lap · {fmtDuration(batch.mins)}</p></div>
+                                    <button onClick={e=>{e.stopPropagation();const uArr=Object.entries(batch.byUser).map(([uid,ud])=>{const uf=users.find(x=>x.id===uid)||{};return{userName:uf.displayName||'?',sheets:ud.sheets,totalAmt:ud.total,totalMins:ud.mins,bankName:uf.bankName,accountNumber:uf.accountNumber,accountHolder:uf.accountHolder};});printReceipt({appName:td?.appName,paidDate:formatDateShort(bk),users:uArr,xRate});}} className="w-8 h-8 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-500 flex items-center justify-center flex-shrink-0 transition-all active:scale-90" title="Cetak Resi Semua"><i className="fas fa-print text-xs"></i></button>
                                     <div className="flex items-center gap-2 flex-shrink-0"><p className="font-black text-emerald-600">{fmtC(batch.total)}</p><i className={`fas fa-chevron-${isBExp?'up':'down'} text-slate-300 text-xs`}></i></div>
                                 </div>
                                 {isBExp&&<div className="border-t border-slate-100">{Object.entries(batch.byUser).sort((a,b)=>b[1].total-a[1].total).map(([uid,ud])=>{const u=getU(uid);const uFull=users.find(x=>x.id===uid);const uKey='bu_'+bk+'_'+uid;const uExp=expandedUsers[uKey];return(
