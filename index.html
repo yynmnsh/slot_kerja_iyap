@@ -1502,93 +1502,61 @@
                     </div>)}
 
 
-                    {/* ═══ PETA JADWAL HARIAN — per-user rows ═══ */}
+                    {/* ═══ PETA JADWAL HARIAN ═══ */}
                     {(()=>{
-                        // Always use PT for timeline positioning (PT day boundary = the work day)
+                        const prevPt=(()=>{const[y,mo,d]=tsPt.split('-').map(Number);const dt=new Date(y,mo-1,d);dt.setDate(dt.getDate()-1);return`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;})();
+                        const toM=t=>{const[h,m]=(t||'00:00').split(':').map(Number);return h*60+m;};
                         const ptOff=TZ_CONFIG.PT.offsetUTC;
-                        const toPtMin=(dateStr,timeStr)=>{
-                            const ep=getEpochFromWIB(dateStr,timeStr);
-                            const d=new Date(ep+ptOff*3600000);
-                            return d.getUTCHours()*60+d.getUTCMinutes();
-                        };
-                        // Filter schedules for this PT day (including cross-midnight spill)
-                        const daySch=schedules.filter(s=>{
-                            const pt=getPSTDay(s.startDate||s.date,s.startTime);
-                            if(pt===tsPt) return true;
-                            const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);
-                            let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);
-                            if(!s.endDate&&eE<=sE)eE+=86400000;
-                            return eE>sE&&addDays(pt,1)===tsPt;
-                        });
-                        const dayTs=timesheets.filter(ts=>{
-                            const pt=getPSTDay(ts.date,ts.startTime);
-                            if(pt===tsPt) return true;
-                            const sE2=getEpochFromWIB(ts.date,ts.startTime);
-                            let eE2=sE2;
-                            if(ts.endTime){eE2=getEpochFromWIB(ts.endDate||ts.date,ts.endTime);if(eE2<=sE2)eE2+=86400000;}
-                            else if(ts.duration){eE2=sE2+ts.duration*60000;}
-                            return eE2>sE2&&addDays(pt,1)===tsPt;
-                        });
-                        // Build blocks in PT minutes
-                        const mkBlock=(item,isTs)=>{
-                            const ptDay=getPSTDay(isTs?item.date:(item.startDate||item.date),item.startTime);
-                            const spillsIn=ptDay!==tsPt;
-                            let sM=toPtMin(item.startDate||item.date,item.startTime);
-                            let eM;
-                            if(isTs&&!item.endTime&&item.duration){
-                                const ep=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;
-                                const d=new Date(ep+ptOff*3600000);
-                                eM=d.getUTCHours()*60+d.getUTCMinutes();
-                            } else {
-                                eM=toPtMin(item.endDate||item.endDate||item.startDate||item.date,item.endTime||item.startTime);
-                            }
-                            let w;
-                            if(spillsIn){sM=0;w=eM;}
-                            else if(eM>sM){w=eM-sM;}
-                            else if(eM<sM){w=1440-sM;}
-                            else{w=0;}
-                            const dm=isTs?(parseInt(item.duration)||0):w;
-                            // Display times in both zones
-                            const sWIB=toDisplayTime(item.startTime,item.startDate||item.date,'WIB');
-                            const sPT2=toDisplayTime(item.startTime,item.startDate||item.date,'PT');
-                            let eWIB,ePT2;
-                            if(isTs&&!item.endTime&&item.duration){
-                                const ep2=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;
-                                const dw=new Date(ep2+TZ_CONFIG.WIB.offsetUTC*3600000);
-                                eWIB={time:`${String(dw.getUTCHours()).padStart(2,'0')}:${String(dw.getUTCMinutes()).padStart(2,'0')}`};
-                                const dp=new Date(ep2+ptOff*3600000);
-                                ePT2={time:`${String(dp.getUTCHours()).padStart(2,'0')}:${String(dp.getUTCMinutes()).padStart(2,'0')}`};
-                            } else {
-                                eWIB=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'WIB');
-                                ePT2=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,'PT');
-                            }
-                            return{userId:item.userId,sM,w,dm,wib:{s:sWIB.time,e:eWIB.time},pt:{s:sPT2.time,e:ePT2.time}};
-                        };
-                        const schB=daySch.map(s=>({...mkBlock(s,false),id:s.id}));
-                        const tsB=dayTs.map(t=>({...mkBlock(t,true),id:t.id}));
+                        const toPt=(timeStr,dateStr)=>{const ep=getEpochFromWIB(dateStr,timeStr);const d=new Date(ep+ptOff*3600000);return{time:`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`,date:`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`};};
+                        // Build plan blocks
+                        const buildPlan=s=>({...s,uiS:toPt(s.startTime,s.startDate||s.date),uiE:toPt(s.endTime,s.endDate||s.date),isPlan:true});
+                        const planMain=schedules.filter(s=>getPSTDay(s.startDate||s.date,s.startTime)===tsPt).map(buildPlan);
+                        const planOver=schedules.filter(s=>getPSTDay(s.startDate||s.date,s.startTime)===prevPt).map(buildPlan).filter(b=>b.uiE.date>b.uiS.date).map(b=>({...b,isOverflow:true}));
+                        const planBlocks=[...planMain,...planOver];
+                        // Build actual blocks
+                        const buildAct=ts=>{const uiS=toPt(ts.startTime,ts.date);let uiE;if(ts.endTime){uiE=toPt(ts.endTime,ts.endDate||ts.date);}else if(ts.duration){const eEp=getEpochFromWIB(ts.date,ts.startTime)+ts.duration*60000;const eD=new Date(eEp+ptOff*3600000);uiE={time:`${String(eD.getUTCHours()).padStart(2,'0')}:${String(eD.getUTCMinutes()).padStart(2,'0')}`,date:getPSTDayFromEpoch(eEp)};}else{uiE={time:'23:59',date:tsPt};}return{...ts,uiS,uiE,isPlan:false};};
+                        const actMain=timesheets.filter(ts=>getPSTDay(ts.date,ts.startTime)===tsPt).map(buildAct);
+                        const actOver=timesheets.filter(ts=>getPSTDay(ts.date,ts.startTime)===prevPt).map(buildAct).filter(b=>b.uiE.date>b.uiS.date).map(b=>({...b,isOverflow:true}));
+                        const actBlocks=[...actMain,...actOver];
+                        const totalActM=actBlocks.reduce((a,b)=>{if(b.isOverflow)return a+Math.max(0,toM(b.uiE.time));const sM2=toM(b.uiS.time),eM2=toM(b.uiE.time);return a+Math.max(0,(eM2<=sM2?1440:eM2)-sM2);},0);
+                        const isToday=tsPt===todayPtTs;
+                        const userIds=[...new Set([...planBlocks,...actBlocks].map(b=>b.userId))];
+                        const rowMap={};userIds.forEach((uid,i)=>{rowMap[uid]=i;});
+                        const mapH=Math.max(1,userIds.length)*28+20;
                         const getUx=uid=>users.find(u=>u.id===uid)||{displayName:'?',color:'#94a3b8'};
-                        const totalActM=dayTs.reduce((a,t)=>a+parseInt(t.duration||0),0);
-                        const hasData=daySch.length>0||dayTs.length>0;
-                        // Group by user
-                        const userIds=[...new Set([...schB.map(b=>b.userId),...tsB.map(b=>b.userId)])];
-                        // NowLine in PT
-                        const noP=new Date(Date.now()+ptOff*3600000);
-                        const nowPtM=noP.getUTCHours()*60+noP.getUTCMinutes();
-                        const nowPct2=nowPtM/1440*100;
-                        const nowWIB=(()=>{const d=new Date(Date.now()+TZ_CONFIG.WIB.offsetUTC*3600000);return`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;})();
-                        const nowPTstr=`${String(noP.getUTCHours()).padStart(2,'0')}:${String(noP.getUTCMinutes()).padStart(2,'0')}`;
-                        const isTodayMap=todayPtTs===tsPt;
-                        // Tooltip for blocks
-                        const BlkTip=({b,isSch})=>{const ux=getUx(b.userId);const pL=b.sM/1440*100;const pW=Math.max(b.w/1440*100,0.8);return(
-                            <div className={`absolute top-0 bottom-0 rounded-[3px] flex items-center justify-center overflow-visible group cursor-default z-10 hover:z-40 border transition-all hover:brightness-105 ${isSch?'border-transparent':'border-white/40'}`} style={{left:`${pL}%`,width:`${pW}%`,background:isSch?ux.color+'cc':ux.color,opacity:isSch?0.45:0.85}}>
-                                {b.w>50&&<span className="text-[6px] font-bold text-white truncate px-0.5">{(ux.displayName||'').split(' ')[0]}</span>}
-                                <div className={`hidden group-hover:flex absolute ${pL>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur text-white text-[10px] p-2 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-0.5 z-50 border border-white/10 pointer-events-none`}>
-                                    <div className="flex items-center gap-1.5 pb-1 border-b border-white/10"><div className="w-2 h-2 rounded-full" style={{background:ux.color}}></div><b>{ux.displayName}</b></div>
-                                    <span className="text-slate-300 text-[9px]"><b className="text-cyan-400 w-7 inline-block">WIB</b>{b.wib.s}–{b.wib.e}</span>
-                                    <span className="text-slate-300 text-[9px]"><b className="text-amber-400 w-7 inline-block">PT</b>{b.pt.s}–{b.pt.e}</span>
-                                    <span className="text-slate-400 text-[8px] pt-0.5 border-t border-white/10 mt-0.5">{fmtDuration(b.dm)} · {isSch?'Jadwal':'Laporan'}</span>
+                        const hasData=planBlocks.length>0||actBlocks.length>0;
+
+                        const RenderBlock=({b,idx})=>{
+                            const ri=rowMap[b.userId]||0;
+                            let sM,eM;
+                            if(b.isOverflow){sM=0;eM=toM(b.uiE.time);if(eM<=0)return null;}
+                            else{sM=toM(b.uiS.time);eM=toM(b.uiE.time);if(eM<sM)eM=1440;if(eM<=sM)return null;}
+                            const origS=toM(b.uiS.time),origE=toM(b.uiE.time);
+                            const durM=origE<origS?1440-origS+origE:origE-origS;
+                            const lPct=sM/1440*100;const wPct=Math.max(0.5,(eM-sM)/1440*100);
+                            const color=getUx(b.userId).color||'#94a3b8';
+                            const name=getUx(b.userId).displayName;
+                            const topPx=b.isPlan?ri*28+2:ri*28+15;
+                            const crossN=!b.isOverflow&&eM===1440&&origE<origS;
+                            // Also compute WIB times for tooltip
+                            const sWIB=toDisplayTime(b.startTime,b.startDate||b.date,'WIB');
+                            let eWIB;if(!b.isPlan&&!b.endTime&&b.duration){const ep2=getEpochFromWIB(b.date,b.startTime)+b.duration*60000;const d2=new Date(ep2+TZ_CONFIG.WIB.offsetUTC*3600000);eWIB={time:`${String(d2.getUTCHours()).padStart(2,'0')}:${String(d2.getUTCMinutes()).padStart(2,'0')}`};}else{eWIB=toDisplayTime(b.endTime||b.startTime,b.endDate||b.startDate||b.date,'WIB');}
+                            return(
+                            <div key={`${b.isPlan?'p':'a'}-${b.id}-${idx}`} className="absolute group cursor-pointer hover:z-30" style={{left:`${lPct}%`,width:`${wPct}%`,top:`${topPx}px`,height:'12px'}}>
+                                {b.isPlan
+                                    ?<div className={`w-full h-full rounded-sm border-2 ${b.isOverflow?'opacity-60':''}`} style={{borderColor:color,backgroundColor:color+'20',borderStyle:b.isOverflow?'dashed':'solid'}}></div>
+                                    :<div className={`w-full h-full rounded-sm shadow-sm ${b.isOverflow?'opacity-60':''}`} style={{backgroundColor:color,opacity:b.isOverflow?0.5:0.85}}></div>
+                                }
+                                <div className={`hidden group-hover:flex absolute bottom-full mb-1 ${lPct>55?'right-0':'left-0'} bg-slate-900/95 backdrop-blur text-white text-[9px] p-2 rounded-xl shadow-2xl z-50 whitespace-nowrap flex-col gap-0.5 border border-white/10`}>
+                                    <span className="font-bold flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor:color}}></div>{name}{b.isOverflow&&<span className="text-[8px] text-indigo-300">(lanjutan)</span>}</span>
+                                    <span className="text-slate-300 font-mono"><b className="text-amber-400 mr-1">PT</b>{b.uiS.time}–{b.uiE.time} <span className="text-slate-500">({fmtDuration(durM)})</span></span>
+                                    <span className="text-slate-300 font-mono"><b className="text-cyan-400 mr-1">WIB</b>{sWIB.time}–{eWIB.time}</span>
+                                    {crossN&&<span className="text-amber-400 text-[8px]">→ berlanjut ke hari berikutnya</span>}
+                                    {b.isOverflow&&<span className="text-amber-400 text-[8px]">← dimulai hari sebelumnya</span>}
+                                    <span className="text-slate-500 text-[8px]">{b.isPlan?'📅 Dijadwalkan':'✅ Dilaporkan'}{!b.isPlan&&(b.status==='paid'?' · 💰 Dibayar':' · ⏳ Pending')}</span>
                                 </div>
                             </div>);};
+
                         return(
                         <div className="rounded-2xl overflow-hidden" style={{background:'rgba(255,255,255,0.97)',border:'1px solid rgba(226,232,240,0.5)',boxShadow:'0 2px 12px rgba(0,0,0,0.04)'}}>
                             <div className="px-4 py-2.5 flex items-center justify-between" style={{background:`linear-gradient(135deg, ${theme.primaryDark}, ${theme.primary})`}}>
@@ -1596,58 +1564,37 @@
                                 <p className="text-white/40 text-[9px] mt-0.5">Atas = Dijadwalkan · Bawah = Dilaporkan</p></div>
                                 <div className="flex items-center gap-0.5 bg-white/10 rounded-xl p-0.5 border border-white/10">
                                     <button onClick={()=>shiftTsPt(-1)} className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all active:scale-90"><i className="fas fa-chevron-left text-[10px]"></i></button>
-                                    <button onClick={()=>setTsPt(todayPtTs)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[64px] text-center transition-all ${tsPt===todayPtTs?'bg-white shadow-md':'text-white/80 hover:bg-white/15'}`} style={tsPt===todayPtTs?{color:theme.primary}:{}}>{tsPt===todayPtTs?'Hari Ini':formatDateShort(tsPt)}</button>
+                                    <button onClick={()=>setTsPt(todayPtTs)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[64px] text-center transition-all ${isToday?'bg-white shadow-md':'text-white/80 hover:bg-white/15'}`} style={isToday?{color:theme.primary}:{}}>{isToday?'Hari Ini':formatDateShort(tsPt)}</button>
                                     <button onClick={()=>shiftTsPt(1)} className="w-7 h-7 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all active:scale-90"><i className="fas fa-chevron-right text-[10px]"></i></button>
                                 </div>
                             </div>
-                            <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
-                                <i className="fas fa-info-circle text-blue-400 text-[9px]"></i>
-                                <span className="text-[9px] text-slate-500">Batas hari kerja menggunakan <b>PT (Pacific Time)</b> — 00:00–23:59 PT — terlepas dari zona tampilan.</span>
+                            <div className="px-3 py-1.5 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
+                                <i className="fas fa-clock text-blue-400 text-[9px]"></i>
+                                <span className="text-[9px] text-slate-500">Hari kerja dihitung berdasarkan <b>PT (Pacific Time)</b> — 00:00–23:59 PT.</span>
+                            </div>
+                            <div className="flex divide-x divide-slate-100 bg-slate-50 border-b border-slate-100">
+                                <div className="flex-1 px-3 py-2 text-center"><p className="text-[8px] font-bold text-slate-400 uppercase">Rencana</p><p className="text-sm font-black text-slate-700">{planBlocks.length}</p></div>
+                                <div className="flex-1 px-3 py-2 text-center"><p className="text-[8px] font-bold text-slate-400 uppercase">Aktual</p><p className="text-sm font-black" style={{color:theme.primary}}>{actBlocks.length}</p></div>
+                                <div className="flex-1 px-3 py-2 text-center"><p className="text-[8px] font-bold text-slate-400 uppercase">Jam Aktual</p><p className="text-sm font-black text-cyan-600">{(totalActM/60).toFixed(1)}j</p></div>
                             </div>
                             {hasData?(
                             <div className="p-3">
-                                {/* Stats */}
-                                <div className="grid grid-cols-3 gap-2 mb-3">
-                                    <div className="text-center py-2"><p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Dijadwalkan</p><p className="text-lg font-black text-slate-800">{daySch.length}</p></div>
-                                    <div className="text-center py-2"><p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Dilaporkan</p><p className="text-lg font-black text-slate-800">{dayTs.length}</p></div>
-                                    <div className="text-center py-2"><p className="text-[7px] font-bold text-slate-400 uppercase tracking-widest">Jam Aktual</p><p className="text-lg font-black text-slate-800">{(totalActM/60).toFixed(1)}<span className="text-sm font-normal text-slate-400">j</span></p></div>
-                                </div>
-                                {/* Hour header */}
-                                <div className="relative ml-16">
-                                    <div className="flex justify-between text-[7px] font-mono text-slate-400 font-bold mb-1 pr-px">{[0,4,8,12,16,20,24].map(h=><span key={h}>{String(h).padStart(2,'0')}</span>)}</div>
-                                </div>
-                                {/* Per-user rows */}
-                                <div className="relative">
-                                    {userIds.map(uid=>{const ux=getUx(uid);const uSch=schB.filter(b=>b.userId===uid&&b.w>0);const uTs=tsB.filter(b=>b.userId===uid&&b.w>0);return(
-                                        <div key={uid} className="flex items-stretch border-b border-slate-100/60 last:border-0">
-                                            <div className="w-16 flex-shrink-0 flex items-center gap-1.5 py-1.5 pr-2">
-                                                <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{background:ux.color}}></div>
-                                                <span className="text-[9px] font-bold text-slate-600 truncate leading-tight">{ux.displayName}</span>
-                                            </div>
-                                            <div className="flex-1 relative min-w-0">
-                                                <div className="relative h-4 border-b border-dashed border-slate-100/50">
-                                                    {uSch.map((b,i)=><BlkTip key={'s'+i} b={b} isSch={true} />)}
-                                                </div>
-                                                <div className="relative h-4">
-                                                    {uTs.map((b,i)=><BlkTip key={'a'+i} b={b} isSch={false} />)}
-                                                </div>
+                                <div className="relative w-full h-4 mb-1 flex justify-between">{[0,4,8,12,16,20,24].map(h=><div key={h} className="w-0 relative"><span className={`absolute text-[7px] text-slate-400 font-bold ${h===0?'left-0':h===24?'right-0':'-translate-x-1/2'}`}>{String(h).padStart(2,'0')}</span></div>)}</div>
+                                <div className="relative w-full bg-slate-50 border border-slate-200 rounded-lg overflow-visible" style={{height:`${mapH}px`}}>
+                                    {[0,4,8,12,16,20,24].map(h=><div key={h} className="absolute top-0 bottom-0 border-l border-slate-200 border-dashed w-0" style={{left:`${h/24*100}%`}}></div>)}
+                                    {userIds.map((uid,ri)=><div key={uid} className="absolute left-0 flex items-center gap-1 z-20 pointer-events-none" style={{top:`${ri*28+2}px`}}><div className="w-1 h-5 rounded-r opacity-70" style={{backgroundColor:getUx(uid).color}}></div><span className="text-[7px] font-bold text-slate-400">{(getUx(uid).displayName||'').substring(0,7)}</span></div>)}
+                                    {planBlocks.map((b,i)=><RenderBlock key={'p'+i} b={b} idx={i} />)}
+                                    {actBlocks.map((b,i)=><RenderBlock key={'a'+i} b={b} idx={i} />)}
+                                    {isToday&&(()=>{const nP=new Date(Date.now()+ptOff*3600000);const nM=nP.getUTCHours()*60+nP.getUTCMinutes();const nPct=nM/1440*100;const ptHH=`${String(nP.getUTCHours()).padStart(2,'0')}:${String(nP.getUTCMinutes()).padStart(2,'0')}`;const nW=new Date(Date.now()+TZ_CONFIG.WIB.offsetUTC*3600000);const wibHH=`${String(nW.getUTCHours()).padStart(2,'0')}:${String(nW.getUTCMinutes()).padStart(2,'0')}`;return(<>
+                                        <div className="absolute top-0 bottom-0 w-0.5 bg-red-400 z-20 pointer-events-none" style={{left:`${nPct}%`,animation:'pulseSoft 2s ease-in-out infinite'}}><div className="absolute -top-1 w-2.5 h-2.5 rounded-full bg-red-400" style={{left:'50%',transform:'translateX(-50%)'}}></div></div>
+                                        <div className="absolute top-0 z-30 group" style={{left:`${nPct}%`,width:'1px',height:'100%',cursor:'default'}}>
+                                            <div className={`hidden group-hover:flex absolute top-0 ${nPct>75?'right-0':'left-1'} bg-slate-900/95 backdrop-blur text-white text-[9px] font-bold rounded-xl shadow-xl whitespace-nowrap flex-col overflow-hidden border border-white/10 z-50`}>
+                                                <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-white/10"><i className="fas fa-circle text-[5px] text-red-400"></i><span className="text-red-300 text-[8px]">PT</span><span className="font-mono">{ptHH}</span><span className="text-slate-400 text-[8px]">Sekarang</span></div>
+                                                <div className="flex items-center gap-1.5 px-2.5 py-1.5"><i className="fas fa-circle text-[5px] text-cyan-400"></i><span className="text-cyan-300 text-[8px]">WIB</span><span className="font-mono text-slate-200">{wibHH}</span></div>
                                             </div>
                                         </div>
-                                    );})}
-                                    {/* Grid lines over timeline area */}
-                                    <div className="absolute top-0 bottom-0 left-16 right-0 flex pointer-events-none z-0">{Array.from({length:25},(_,h)=><div key={h} className={`h-full flex-shrink-0 ${h%4===0?'border-l border-slate-200/30':''}`} style={{width:`${100/24}%`}}></div>)}</div>
-                                    {/* NowLine over timeline area */}
-                                    {isTodayMap&&<div className="absolute top-0 bottom-0 pointer-events-none z-20" style={{left:`calc(64px + (100% - 64px) * ${nowPct2/100})`}}>
-                                        <div className="absolute top-0 bottom-0 w-px bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div>
-                                    </div>}
+                                    </>);})()}
                                 </div>
-                                {/* NowLine hover dot below rows */}
-                                {isTodayMap&&<div className="relative ml-16 mt-1">
-                                    <div className="absolute z-20 group cursor-default" style={{left:`${nowPct2}%`,transform:'translateX(-50%)'}}>
-                                        <div className="w-2.5 h-2.5 bg-red-500 rounded-full mx-auto shadow-sm shadow-red-200"></div>
-                                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 top-4 bg-red-600 text-white text-[8px] font-bold px-2.5 py-1 rounded-lg shadow-lg whitespace-nowrap z-50">WIB {nowWIB} · PT {nowPTstr}</div>
-                                    </div>
-                                </div>}
                             </div>
                             ):(
                             <div className="px-4 py-8 text-center"><div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-slate-50 border border-dashed border-slate-200"><i className="fas fa-calendar-xmark text-slate-300 text-lg"></i></div><p className="text-sm font-semibold text-slate-400">Tidak ada data</p><p className="text-[10px] text-slate-300 mt-1">Gunakan ◀ ▶ untuk berpindah hari</p></div>
@@ -1879,6 +1826,7 @@
             const [isEditSt, setIsEditSt] = useState(false);
             const [selectedSheets, setSelSh] = useState({});
             const [expandedUsers, setExpU] = useState({});
+            const [selAllocs, setSelAllocs] = useState(new Set());
             const [cfm, setCfm] = useState({show:false});
             const [busy, setBusy] = useState(false);
             const [actLog, setActLog] = useState([]);
@@ -1954,30 +1902,36 @@
                                 </div>
                                 <div className="divide-y divide-violet-50">
                                     {allocs.map((al,i)=>{
+                                        const isSel=selAllocs.has(i);
                                         const perHr=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);
                                         const totalAll=Math.round(perHr*totalPendHrs);
                                         const totalSel=Math.round(perHr*selHrs);
                                         return(
-                                        <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                                        <div key={i} onClick={()=>setSelAllocs(p=>{const n=new Set(p);n.has(i)?n.delete(i):n.add(i);return n;})} className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${isSel?'bg-violet-50/60':'hover:bg-slate-50'}`}>
+                                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${isSel?'border-violet-500 bg-violet-500':'border-slate-300'}`}>{isSel&&<i className="fas fa-check text-white text-[8px]"></i>}</div>
                                             <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0"><i className="fas fa-piggy-bank text-violet-500 text-xs"></i></div>
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-xs font-bold text-slate-700">{al.name||'Kantong '+(i+1)}</p>
                                                 <p className="text-[9px] text-slate-400">Rp{Math.round(perHr).toLocaleString('id-ID')}/jam · {al.type==='percent'?al.value+'%':'tetap'}</p>
                                             </div>
                                             <div className="text-right flex-shrink-0">
-                                                <p className="text-xs font-black text-violet-700">Rp{totalAll.toLocaleString('id-ID')}</p>
+                                                <p className={`text-xs font-black ${isSel?'text-violet-700':'text-slate-400'}`}>Rp{totalAll.toLocaleString('id-ID')}</p>
                                                 <p className="text-[9px] text-slate-400">{totalPendHrs.toFixed(1)}j total</p>
-                                                {hasSel&&<p className="text-[9px] text-violet-500 font-bold">Dipilih: Rp{totalSel.toLocaleString('id-ID')} ({selHrs.toFixed(1)}j)</p>}
+                                                {hasSel&&<p className="text-[9px] text-violet-500 font-bold">User dipilih: Rp{totalSel.toLocaleString('id-ID')}</p>}
                                             </div>
                                         </div>);
                                     })}
+                                    {(()=>{const checkedAllocs=[...selAllocs].filter(i=>allocs[i]);const checkedTotal=Math.round(checkedAllocs.reduce((a,i)=>{const al=allocs[i];const p=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return a+p*totalPendHrs;},0));const checkedSelTotal=Math.round(checkedAllocs.reduce((a,i)=>{const al=allocs[i];const p=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return a+p*selHrs;},0));return(
                                     <div className="flex items-center justify-between px-4 py-2.5 bg-violet-50/30">
-                                        <span className="text-[10px] font-bold text-violet-600">Total Alokasi</span>
-                                        <div className="text-right">
-                                            <span className="text-xs font-black text-violet-700">Rp{Math.round(allocs.reduce((a,al)=>{const p=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return a+p*totalPendHrs;},0)).toLocaleString('id-ID')}</span>
-                                            {hasSel&&<p className="text-[9px] text-violet-500 font-bold">Dipilih: Rp{Math.round(allocs.reduce((a,al)=>{const p=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return a+p*selHrs;},0)).toLocaleString('id-ID')}</p>}
+                                        <div>
+                                            <span className="text-[10px] font-bold text-violet-600">Dipilih: {checkedAllocs.length}/{allocs.length} kantong</span>
+                                            {hasSel&&<p className="text-[9px] text-violet-500 mt-0.5">Dari user dicentang: Rp{checkedSelTotal.toLocaleString('id-ID')} ({selHrs.toFixed(1)}j)</p>}
                                         </div>
-                                    </div>
+                                        <div className="text-right">
+                                            <span className="text-xs font-black text-violet-700">Rp{checkedTotal.toLocaleString('id-ID')}</span>
+                                            <p className="text-[9px] text-slate-400">{totalPendHrs.toFixed(1)}j total</p>
+                                        </div>
+                                    </div>);})()}
                                 </div>
                             </div>);
                         })()}
