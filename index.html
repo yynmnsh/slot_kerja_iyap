@@ -1048,16 +1048,29 @@
                 return ls;
             }, [schedules, showHistory, filterMine, sortOrder, session.id, canViewAll]);
 
-            // Timeline
+            // Timeline — handles cross-midnight blocks
             const tlBlocks = useMemo(() => {
                 const bl = [];
                 schedules.forEach(s => {
                     if (editId && s.id === editId) return;
-                    if (getPSTDay(s.startDate||s.date, s.startTime) !== mapPt) return;
-                    const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz); const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
-                    const sM = parseInt(uS.time.split(':')[0])*60 + parseInt(uS.time.split(':')[1]); const eM = parseInt(uE.time.split(':')[0])*60 + parseInt(uE.time.split(':')[1]);
-                    if (uS.date === uE.date && eM > sM) bl.push({...s, sp:sM/1440*100, wp:(eM-sM)/1440*100, uS, uE});
-                    else if (uS.date < uE.date) bl.push({...s, sp:sM/1440*100, wp:(1440-sM)/1440*100, uS, uE});
+                    const ptDay = getPSTDay(s.startDate||s.date, s.startTime);
+                    const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz);
+                    const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
+                    const sM = parseInt(uS.time.split(':')[0])*60 + parseInt(uS.time.split(':')[1]);
+                    const eM = parseInt(uE.time.split(':')[0])*60 + parseInt(uE.time.split(':')[1]);
+                    const crossesMidnight = uS.date < uE.date;
+                    if (ptDay === mapPt) {
+                        // Block starts on this PT day
+                        if (crossesMidnight) {
+                            bl.push({...s, sp:sM/1440*100, wp:(1440-sM)/1440*100, uS, uE});
+                        } else if (eM > sM) {
+                            bl.push({...s, sp:sM/1440*100, wp:(eM-sM)/1440*100, uS, uE});
+                        }
+                    }
+                    // Check if this schedule spills INTO mapPt from previous day
+                    if (crossesMidnight && addDays(ptDay, 1) === mapPt) {
+                        bl.push({...s, sp:0, wp:eM/1440*100, uS:{...uS,time:'00:00'}, uE, _cont:true});
+                    }
                 });
                 return bl;
             }, [schedules, mapPt, editId, tz]);
@@ -1491,18 +1504,47 @@
 
                     {/* ═══ PETA VISUAL: JADWAL vs AKTUAL ═══ */}
                     {(()=>{
-                        const daySch=schedules.filter(s=>getPSTDay(s.startDate||s.date,s.startTime)===tsPt);
-                        const dayTs=timesheets.filter(ts=>getPSTDay(ts.date,ts.startTime)===tsPt);
+                        const daySch=schedules.filter(s=>{
+                            const pt=getPSTDay(s.startDate||s.date,s.startTime);
+                            if(pt===tsPt) return true;
+                            // Also include if crosses midnight into tsPt
+                            const sE=getEpochFromWIB(s.startDate||s.date,s.startTime);
+                            let eE=getEpochFromWIB(s.endDate||s.date,s.endTime);
+                            if(!s.endDate&&eE<=sE)eE+=86400000;
+                            if(eE>sE&&addDays(pt,1)===tsPt) return true;
+                            return false;
+                        });
+                        const dayTs=timesheets.filter(ts=>{
+                            const pt=getPSTDay(ts.date,ts.startTime);
+                            if(pt===tsPt) return true;
+                            const sE2=getEpochFromWIB(ts.date,ts.startTime);
+                            let eE2=sE2;
+                            if(ts.endTime){eE2=getEpochFromWIB(ts.endDate||ts.date,ts.endTime);if(eE2<=sE2)eE2+=86400000;}
+                            else if(ts.duration){eE2=sE2+ts.duration*60000;}
+                            if(eE2>sE2&&addDays(pt,1)===tsPt) return true;
+                            return false;
+                        });
                         const toBlock=(item,isTs)=>{
+                            const ptDay=getPSTDay(isTs?(item.date):(item.startDate||item.date),item.startTime);
+                            const spillsIn=ptDay!==tsPt&&addDays(ptDay,1)===tsPt;
                             const sO=toDisplayTime(item.startTime,item.startDate||item.date,tz);
                             let eO;
                             if(isTs&&!item.endTime&&item.duration){const ep=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d=new Date(ep+TZ_CONFIG[tz].offsetUTC*3600000);eO={time:`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`};}
                             else{eO=toDisplayTime(item.endTime||item.startTime,item.endDate||item.startDate||item.date,tz);}
-                            const sM=parseInt(sO.time.split(':')[0])*60+parseInt(sO.time.split(':')[1]);
-                            const eM=parseInt(eO.time.split(':')[0])*60+parseInt(eO.time.split(':')[1]);
-                            const w=eM>sM?(eM-sM):0;
-                            const dm=isTs?(parseInt(item.duration)||0):w;
-                            // Compute WIB and PT times for tooltip
+                            let sM=parseInt(sO.time.split(':')[0])*60+parseInt(sO.time.split(':')[1]);
+                            let eM=parseInt(eO.time.split(':')[0])*60+parseInt(eO.time.split(':')[1]);
+                            let w;
+                            if(spillsIn){
+                                // This block started yesterday, show 00:00 to endTime on this day
+                                sM=0; w=eM;
+                            } else if(eM>sM){
+                                w=eM-sM;
+                            } else if(eM<sM){
+                                // Crosses midnight — show start to 24:00 on this day
+                                w=1440-sM;
+                            } else { w=0; }
+                            const dm=isTs?(parseInt(item.duration)||0):(w>0?w:0);
+                            // Dual timezone
                             const sWIB=toDisplayTime(item.startTime,item.startDate||item.date,'WIB');
                             let eWIB;
                             if(isTs&&!item.endTime&&item.duration){const ep2=getEpochFromWIB(item.date,item.startTime)+item.duration*60000;const d2=new Date(ep2+TZ_CONFIG.WIB.offsetUTC*3600000);eWIB={time:`${String(d2.getUTCHours()).padStart(2,'0')}:${String(d2.getUTCMinutes()).padStart(2,'0')}`};}
@@ -1550,6 +1592,11 @@
                             </div>
                             {hasData?(
                             <div className="p-4 space-y-3">
+                                {/* PT day label */}
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">Hari kerja PT: {tsPt}</span>
+                                    <span className="text-[9px] text-slate-400">Zona tampilan: {TZ_CONFIG[tz]?.short}</span>
+                                </div>
                                 {/* Stats row */}
                                 <div className="grid grid-cols-3 gap-2">
                                     <div className="text-center p-2 rounded-xl bg-blue-50/70 border border-blue-100/50">
@@ -1624,9 +1671,55 @@
         };
 
         /* ═══════════════════════════════════════════════
+           RECEIPT PRINTER — shared by Analytics & Admin
+           ═══════════════════════════════════════════════ */
+        const printReceipt = (data) => {
+            const { appName, userName, paidDate, sheets, totalAmt, totalMins, xRate, tz, bankName, accountNumber, accountHolder } = data;
+            const fmtIDR = n => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+            const rows = sheets.map(ts => {
+                const dm = parseInt(ts.duration||0);
+                const amt = (parseFloat(ts.paymentUSD||0))*xRate;
+                return `<tr><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px">${ts.date}</td><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;font-family:monospace">${ts.startTime||'-'}–${ts.endTime||'-'}</td><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;text-align:center">${Math.floor(dm/60)}j ${dm%60}m</td><td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;text-align:right;font-weight:700">${fmtIDR(amt)}</td></tr>`;
+            }).join('');
+            const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Resi Pembayaran</title><style>@media print{.no-print{display:none!important}}body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;padding:20px;color:#1e293b;font-size:13px}
+            .container{max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden}
+            .header{background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;padding:24px;text-align:center}
+            .header h1{margin:0;font-size:18px;font-weight:800}.header p{margin:4px 0 0;opacity:0.7;font-size:12px}
+            .body{padding:20px}.section{margin-bottom:16px}.label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#64748b;font-weight:700;margin-bottom:4px}
+            .value{font-size:13px;font-weight:600;color:#1e293b}table{width:100%;border-collapse:collapse;margin-top:8px}
+            th{background:#f8fafc;padding:8px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;font-weight:700;text-align:left;border-bottom:2px solid #e2e8f0}
+            .total-row{background:#f0fdf4;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-top:2px solid #e2e8f0}
+            .total-label{font-size:12px;font-weight:700;color:#059669}.total-amt{font-size:20px;font-weight:900;color:#047857}
+            .footer{text-align:center;padding:12px;font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9}
+            .btn{display:inline-block;padding:10px 24px;background:#2563eb;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;margin:8px 4px}
+            .btn:hover{background:#1d4ed8}.btn-outline{background:white;color:#2563eb;border:2px solid #2563eb}.btn-outline:hover{background:#eff6ff}</style></head>
+            <body><div class="container">
+            <div class="header"><h1>${appName||'Scheduler'}</h1><p>Resi Pembayaran</p></div>
+            <div class="body">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div class="section"><div class="label">Penerima</div><div class="value">${userName}</div></div>
+            <div class="section"><div class="label">Tanggal Bayar</div><div class="value">${paidDate}</div></div>
+            ${bankName?`<div class="section"><div class="label">Rekening</div><div class="value">${bankName} · ${accountNumber||'-'}</div>${accountHolder?`<div style="font-size:11px;color:#64748b">a.n. ${accountHolder}</div>`:''}</div>`:''}
+            <div class="section"><div class="label">Total Jam Kerja</div><div class="value">${Math.floor(totalMins/60)}j ${totalMins%60}m</div></div>
+            </div>
+            <div class="label" style="margin-bottom:8px">Rincian Laporan Kerja</div>
+            <table><thead><tr><th>Tanggal</th><th>Waktu</th><th style="text-align:center">Durasi</th><th style="text-align:right">Jumlah</th></tr></thead><tbody>${rows}</tbody></table>
+            </div>
+            <div class="total-row"><span class="total-label">TOTAL PEMBAYARAN</span><span class="total-amt">${fmtIDR(totalAmt)}</span></div>
+            <div class="footer">Dokumen ini dibuat otomatis oleh ${appName||'Scheduler'}</div>
+            </div>
+            <div style="text-align:center;margin-top:16px" class="no-print">
+            <button class="btn" onclick="window.print()"><span style="margin-right:6px">🖨</span>Cetak / Simpan PDF</button>
+            <button class="btn btn-outline" onclick="window.close()">Tutup</button>
+            </div></body></html>`;
+            const w = window.open('', '_blank', 'width=700,height=900');
+            if (w) { w.document.write(html); w.document.close(); }
+        };
+
+        /* ═══════════════════════════════════════════════
            ANALYTICS VIEW — Personal + Team + Receipts
            ═══════════════════════════════════════════════ */
-        const AnalyticsView = ({ schedules, timesheets, users, session, tz, theme, hasPerm, sysSettings }) => {
+        const AnalyticsView = ({ schedules, timesheets, users, session, tz, theme, hasPerm, sysSettings, td }) => {
             const [tab, setTab] = useState('personal');
             const [rcptPreset, setRcptPreset] = useState('all');
             const [rcptFrom, setRcptFrom] = useState('');
@@ -1748,7 +1841,8 @@
                                                     <div onClick={()=>setRcptExp(p=>({...p,[bk]:!isExp}))} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors">
                                                         <div className="w-8 h-8 rounded-lg bg-emerald-100 flex-shrink-0 flex flex-col items-center justify-center"><span className="text-[7px] font-bold text-emerald-500 uppercase">{new Date(bk+'T00:00:00').toLocaleDateString('id-ID',{month:'short'})}</span><span className="text-xs font-black text-emerald-700 leading-tight">{bk.slice(8)}</span></div>
                                                         <div className="flex-1 min-w-0"><p className="text-[10px] font-black text-slate-700">Dibayar {formatDateShort(bk)}</p><p className="text-[9px] text-slate-400">{batch.sheets.length} laporan · {fmtDuration(batch.mins)}</p></div>
-                                                        <div className="flex items-center gap-2 flex-shrink-0"><p className="text-xs font-black text-emerald-600">{fmtC(batch.total)}</p><i className={`fas fa-chevron-${isExp?'up':'down'} text-slate-300 text-[9px]`}></i></div>
+                                                        <button onClick={e=>{e.stopPropagation();const me0=users.find(u=>u.id===session.id);printReceipt({appName:td?.appName,userName:session.displayName,paidDate:formatDateShort(bk),sheets:batch.sheets,totalAmt:batch.total,totalMins:batch.mins,xRate,tz,bankName:me0?.bankName,accountNumber:me0?.accountNumber,accountHolder:me0?.accountHolder});}} className="w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-500 flex items-center justify-center flex-shrink-0 transition-all active:scale-90" title="Cetak Resi"><i className="fas fa-print text-[10px]"></i></button>
+                                                        <div className="flex items-center gap-1 flex-shrink-0"><p className="text-xs font-black text-emerald-600">{fmtC(batch.total)}</p><i className={`fas fa-chevron-${isExp?'up':'down'} text-slate-300 text-[9px]`}></i></div>
                                                     </div>
                                                     {isExp&&<div className="border-t border-slate-100 divide-y divide-slate-50">{batch.sheets.sort((a,b)=>b.date.localeCompare(a.date)).map(ts=>{const sO=toDisplayTime(ts.startTime,ts.date,tz);const eO=ts.endTime?toDisplayTime(ts.endTime,ts.endDate||ts.date,tz):{time:'...'};return(
                                                         <div key={ts.id} className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50">
@@ -1796,7 +1890,7 @@
            ═══════════════════════════════════════════════ */
         const TenantAdminView = ({ users, timesheets, schedules, session, tenant, td, tz, theme, notify, sysSettings, hasPerm, logAct }) => {
             const [tab, setTab] = useState('pending');
-            const [settingsForm, setSF] = useState({ dailyQuotaHours:10, baseHourlyRateUSD:15, usdToIdr:16000, userRates:{} });
+            const [settingsForm, setSF] = useState({ dailyQuotaHours:10, baseHourlyRateUSD:15, usdToIdr:16000, actualKurs:16000, feeAllocations:[], userRates:{} });
             const [isEditSt, setIsEditSt] = useState(false);
             const [selectedSheets, setSelSh] = useState({});
             const [expandedUsers, setExpU] = useState({});
@@ -1812,7 +1906,7 @@
             const fmtC = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
             const getAmt = (ts) => (parseFloat(ts.paymentUSD)||0) * xRate;
 
-            useEffect(()=>{if(!isEditSt&&sysSettings._loaded)setSF({dailyQuotaHours:sysSettings.dailyQuotaHours||10,baseHourlyRateUSD:sysSettings.baseHourlyRateUSD||15,usdToIdr:sysSettings.usdToIdr||16000,userRates:sysSettings.userRates||{}});},[sysSettings]);
+            useEffect(()=>{if(!isEditSt&&sysSettings._loaded)setSF({dailyQuotaHours:sysSettings.dailyQuotaHours||10,baseHourlyRateUSD:sysSettings.baseHourlyRateUSD||15,usdToIdr:sysSettings.usdToIdr||16000,actualKurs:sysSettings.actualKurs||sysSettings.usdToIdr||16000,feeAllocations:sysSettings.feeAllocations||[],userRates:sysSettings.userRates||{}});},[sysSettings]);
             useEffect(()=>{if(!tenant?.id)return;const unsub=window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/activityLog`),snap=>{const e=snap.docs.map(d=>({id:d.id,...d.data()}));e.sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));setActLog(e.slice(0,100));});return()=>unsub();},[tenant?.id]);
             // logAct is received as prop from SchedulerApp
 
@@ -1906,12 +2000,15 @@
                                     <div className="flex-1 min-w-0"><p className="text-xs font-black text-slate-700">Dibayar {formatDateShort(bk)}</p><p className="text-[10px] text-slate-400 mt-0.5">{Object.keys(batch.byUser).length} orang · {batch.sheets.length} lap · {fmtDuration(batch.mins)}</p></div>
                                     <div className="flex items-center gap-2 flex-shrink-0"><p className="font-black text-emerald-600">{fmtC(batch.total)}</p><i className={`fas fa-chevron-${isBExp?'up':'down'} text-slate-300 text-xs`}></i></div>
                                 </div>
-                                {isBExp&&<div className="border-t border-slate-100">{Object.entries(batch.byUser).sort((a,b)=>b[1].total-a[1].total).map(([uid,ud])=>{const u=getU(uid);const uKey='bu_'+bk+'_'+uid;const uExp=expandedUsers[uKey];return(
+                                {isBExp&&<div className="border-t border-slate-100">{Object.entries(batch.byUser).sort((a,b)=>b[1].total-a[1].total).map(([uid,ud])=>{const u=getU(uid);const uFull=users.find(x=>x.id===uid);const uKey='bu_'+bk+'_'+uid;const uExp=expandedUsers[uKey];return(
                                     <div key={uid} className="border-b border-slate-50 last:border-0">
-                                        <div onClick={()=>setExpU(p=>({...p,[uKey]:!uExp}))} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50">
-                                            <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white font-black text-[10px] flex-shrink-0" style={{backgroundColor:u.color}}>{(u.displayName||'?').slice(0,2).toUpperCase()}</div>
-                                            <div className="flex-1"><span className="text-xs font-bold text-slate-700">{u.displayName}</span><p className="text-[9px] text-slate-400">{ud.sheets.length} lap · {fmtDuration(ud.mins)}</p></div>
-                                            <span className="text-xs font-black flex-shrink-0" style={{color:u.color}}>{fmtC(ud.total)}</span><i className={`fas fa-chevron-${uExp?'up':'down'} text-slate-300 text-[9px] ml-1`}></i>
+                                        <div className="flex items-center gap-3 px-4 py-2.5">
+                                            <div onClick={()=>setExpU(p=>({...p,[uKey]:!uExp}))} className="flex items-center gap-3 flex-1 cursor-pointer hover:bg-slate-50 -mx-1 px-1 rounded-lg transition-colors">
+                                                <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white font-black text-[10px] flex-shrink-0" style={{backgroundColor:u.color}}>{(u.displayName||'?').slice(0,2).toUpperCase()}</div>
+                                                <div className="flex-1"><span className="text-xs font-bold text-slate-700">{u.displayName}</span><p className="text-[9px] text-slate-400">{ud.sheets.length} lap · {fmtDuration(ud.mins)}</p></div>
+                                                <span className="text-xs font-black flex-shrink-0" style={{color:u.color}}>{fmtC(ud.total)}</span><i className={`fas fa-chevron-${uExp?'up':'down'} text-slate-300 text-[9px] ml-1`}></i>
+                                            </div>
+                                            <button onClick={()=>printReceipt({appName:td?.appName,userName:u.displayName,paidDate:formatDateShort(bk),sheets:ud.sheets,totalAmt:ud.total,totalMins:ud.mins,xRate,tz,bankName:uFull?.bankName,accountNumber:uFull?.accountNumber,accountHolder:uFull?.accountHolder})} className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 flex items-center justify-center flex-shrink-0 transition-all active:scale-90" title="Cetak Resi"><i className="fas fa-print text-[10px]"></i></button>
                                         </div>
                                         {uExp&&<div className="bg-slate-50/50">{ud.sheets.sort((a,b)=>b.date.localeCompare(a.date)).map(ts=>{const sO=toDisplayTime(ts.startTime,ts.date,tz);const eO=ts.endTime?toDisplayTime(ts.endTime,ts.endDate||ts.date,tz):{time:'...'};return(
                                             <div key={ts.id} className="flex items-center gap-3 px-4 py-2.5 border-t border-slate-100 hover:bg-white transition-colors">
@@ -1955,17 +2052,58 @@
                     </div>)}
 
                     {/* SETTINGS */}
-                    {tab==='settings'&&(<div className="space-y-4">
+                    {tab==='settings'&&(()=>{
+                        const surplus=(settingsForm.actualKurs||0)-(settingsForm.usdToIdr||0);
+                        const surplusPerHr=surplus*(settingsForm.baseHourlyRateUSD||0);
+                        const allocs=settingsForm.feeAllocations||[];
+                        const allocTotal=allocs.reduce((a,al)=>a+(al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0)),0);
+                        const addAlloc=()=>{setIsEditSt(true);setSF(p=>({...p,feeAllocations:[...(p.feeAllocations||[]),{name:'',value:0,type:'fixed'}]}));};
+                        const updateAlloc=(i,f)=>{setIsEditSt(true);setSF(p=>{const a=[...(p.feeAllocations||[])];a[i]={...a[i],...f};return{...p,feeAllocations:a};});};
+                        const removeAlloc=(i)=>{setIsEditSt(true);setSF(p=>({...p,feeAllocations:(p.feeAllocations||[]).filter((_,j)=>j!==i)}));};
+                        return(
+                        <div className="space-y-4">
                         <div className="glass-strong rounded-2xl border border-white/50 p-5 space-y-4">
                             <h3 className="text-sm font-bold text-slate-800"><i className="fas fa-sliders-h mr-2" style={{color:theme.primary}}></i>Pengaturan Umum</h3>
                             <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Kuota Harian Tim (Jam)</label><input type="number" value={settingsForm.dailyQuotaHours||''} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF({...settingsForm,dailyQuotaHours:parseFloat(e.target.value)||0})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold" min="1" max="24" /></div>
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Tarif Default per Jam (USD)</label><input type="number" value={settingsForm.baseHourlyRateUSD||''} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF({...settingsForm,baseHourlyRateUSD:parseFloat(e.target.value)||0})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold" min="0" step="0.5" /><p className="text-[9px] text-slate-400 mt-1">Berlaku untuk semua pengguna kecuali yang di-override di bawah.</p></div>
-                            <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Kurs USD → IDR</label><input type="number" value={settingsForm.usdToIdr||''} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF({...settingsForm,usdToIdr:parseFloat(e.target.value)||0})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold" min="0" /></div>
+                            <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Tarif Default per Jam (USD)</label><input type="number" value={settingsForm.baseHourlyRateUSD||''} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF({...settingsForm,baseHourlyRateUSD:parseFloat(e.target.value)||0})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold" min="0" step="0.5" /></div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Kurs Dasar (IDR/USD)</label><input type="number" value={settingsForm.usdToIdr||''} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF({...settingsForm,usdToIdr:parseFloat(e.target.value)||0})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold" min="0" /><p className="text-[9px] text-slate-400 mt-0.5">Kurs untuk gaji user</p></div>
+                                <div><label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Kurs Aktual (IDR/USD)</label><input type="number" value={settingsForm.actualKurs||''} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF({...settingsForm,actualKurs:parseFloat(e.target.value)||0})} className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold" min="0" /><p className="text-[9px] text-slate-400 mt-0.5">Kurs transaksi sebenarnya</p></div>
+                            </div>
+                            {surplus>0&&<div className="bg-violet-50 border border-violet-100 rounded-xl p-3 space-y-1">
+                                <p className="text-[10px] font-bold text-violet-600"><i className="fas fa-calculator mr-1"></i>Selisih Kurs</p>
+                                <p className="text-xs text-violet-700">Rp{surplus.toLocaleString('id-ID')}/USD × ${settingsForm.baseHourlyRateUSD}/jam = <b>Rp{surplusPerHr.toLocaleString('id-ID')}/jam</b></p>
+                            </div>}
+                        </div>
+
+                        {/* Fee Allocation */}
+                        <div className="glass-strong rounded-2xl border border-white/50 p-5 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <div><h3 className="text-sm font-bold text-slate-800 flex items-center gap-2"><i className="fas fa-wallet text-violet-500"></i>Alokasi Selisih Kurs</h3><p className="text-[10px] text-slate-400 mt-0.5">Distribusi selisih kurs per jam kerja ke kantong alokasi.</p></div>
+                                <button onClick={addAlloc} className="text-[10px] font-bold px-3 py-1.5 rounded-lg bg-violet-100 text-violet-600 hover:bg-violet-200 transition-all active:scale-95"><i className="fas fa-plus text-[8px] mr-1"></i>Tambah</button>
+                            </div>
+                            {allocs.length===0&&<p className="text-[10px] text-slate-400 italic py-3 text-center">Belum ada alokasi. Klik "Tambah" untuk membuat kantong alokasi.</p>}
+                            {allocs.map((al,i)=>{const amt=al.type==='percent'?surplusPerHr*(al.value||0)/100:(al.value||0);return(
+                                <div key={i} className="flex items-center gap-2 p-3 rounded-xl border border-violet-100 bg-violet-50/30">
+                                    <input type="text" value={al.name||''} placeholder="Nama kantong" onChange={e=>updateAlloc(i,{name:e.target.value})} className="flex-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white min-w-0" />
+                                    <input type="number" value={al.value||''} min="0" step={al.type==='percent'?1:500} placeholder="0" onChange={e=>updateAlloc(i,{value:parseFloat(e.target.value)||0})} className="w-20 px-2 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white text-right" />
+                                    <select value={al.type||'fixed'} onChange={e=>updateAlloc(i,{type:e.target.value})} className="text-[10px] py-1.5 px-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-600">
+                                        <option value="fixed">Rp</option>
+                                        <option value="percent">%</option>
+                                    </select>
+                                    <span className="text-[9px] text-violet-600 font-bold w-16 text-right">Rp{Math.round(amt).toLocaleString('id-ID')}</span>
+                                    <button onClick={()=>removeAlloc(i)} className="w-6 h-6 rounded-full bg-red-100 hover:bg-red-200 text-red-400 flex items-center justify-center flex-shrink-0"><i className="fas fa-times text-[8px]"></i></button>
+                                </div>);})}
+                            {allocs.length>0&&<div className="flex justify-between items-center pt-2 border-t border-violet-100">
+                                <span className="text-[10px] font-bold text-slate-500">Total alokasi per jam</span>
+                                <span className={`text-xs font-black ${allocTotal>surplusPerHr?'text-red-500':'text-violet-700'}`}>Rp{Math.round(allocTotal).toLocaleString('id-ID')} / Rp{Math.round(surplusPerHr).toLocaleString('id-ID')}</span>
+                            </div>}
+                            {allocTotal>surplusPerHr&&<p className="text-[10px] text-red-500 font-semibold"><i className="fas fa-exclamation-triangle mr-1"></i>Total alokasi melebihi selisih kurs!</p>}
                         </div>
 
                         {/* Per-user rate override */}
                         <div className="glass-strong rounded-2xl border border-white/50 p-5 space-y-3">
-                            <div><h3 className="text-sm font-bold text-slate-800 flex items-center gap-2"><i className="fas fa-user-tag text-indigo-500"></i>Tarif Khusus per Pengguna</h3><p className="text-[10px] text-slate-400 mt-1">Isi tarif/jam USD khusus. Kosongkan untuk menggunakan tarif default (${settingsForm.baseHourlyRateUSD}/jam).</p></div>
+                            <div><h3 className="text-sm font-bold text-slate-800 flex items-center gap-2"><i className="fas fa-user-tag text-indigo-500"></i>Tarif Khusus per Pengguna</h3><p className="text-[10px] text-slate-400 mt-1">Kosongkan untuk tarif default (${settingsForm.baseHourlyRateUSD}/jam).</p></div>
                             <div className="space-y-2">
                                 {users.filter(u=>u.role!=='admin'||u.id===session.id).map(u=>{
                                     const saved=settingsForm.userRates?.[u.id];
@@ -1974,16 +2112,11 @@
                                     return(
                                     <div key={u.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${hasOvr?'border-indigo-200 bg-indigo-50/40':'border-slate-100 bg-slate-50/40'}`}>
                                         <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white font-black text-[10px] flex-shrink-0" style={{backgroundColor:u.color||'#94a3b8'}}>{(u.displayName||'?').substring(0,2).toUpperCase()}</div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs font-bold text-slate-700 leading-none">{u.displayName}</p>
-                                            {!hasOvr&&<p className="text-[9px] text-slate-400 mt-0.5">Default: ${settingsForm.baseHourlyRateUSD}/jam</p>}
-                                            {hasOvr&&<p className="text-[9px] text-indigo-500 font-bold mt-0.5">Override: ${Number(saved).toFixed(2)}/jam</p>}
-                                        </div>
+                                        <div className="flex-1 min-w-0"><p className="text-xs font-bold text-slate-700 leading-none">{u.displayName}</p>{hasOvr&&<p className="text-[9px] text-indigo-500 font-bold mt-0.5">${Number(saved).toFixed(2)}/jam</p>}</div>
                                         <div className="flex items-center gap-1.5 flex-shrink-0">
                                             <span className="text-[10px] text-slate-400">$</span>
-                                            <input type="number" min="0" step="0.5" placeholder={String(settingsForm.baseHourlyRateUSD)} value={val} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF(prev=>({...prev,userRates:{...prev.userRates,[u.id]:e.target.value}}))} className={`w-20 p-1.5 text-xs font-bold rounded-lg border outline-none text-right transition-all ${hasOvr?'border-indigo-300 bg-white text-indigo-700':'border-slate-200 bg-white text-slate-700'}`} />
-                                            <span className="text-[9px] text-slate-400">/jam</span>
-                                            {hasOvr&&<button onClick={()=>{setIsEditSt(true);setSF(prev=>{const nr={...prev.userRates};delete nr[u.id];return{...prev,userRates:nr};});}} className="w-5 h-5 rounded-full bg-red-100 hover:bg-red-200 text-red-400 flex items-center justify-center transition" title="Hapus override"><i className="fas fa-times text-[8px]"></i></button>}
+                                            <input type="number" min="0" step="0.5" placeholder={String(settingsForm.baseHourlyRateUSD)} value={val} onFocus={()=>setIsEditSt(true)} onChange={e=>setSF(prev=>({...prev,userRates:{...prev.userRates,[u.id]:e.target.value}}))} className={`w-20 p-1.5 text-xs font-bold rounded-lg border outline-none text-right ${hasOvr?'border-indigo-300 bg-white text-indigo-700':'border-slate-200 bg-white text-slate-700'}`} />
+                                            {hasOvr&&<button onClick={()=>{setIsEditSt(true);setSF(prev=>{const nr={...prev.userRates};delete nr[u.id];return{...prev,userRates:nr};});}} className="w-5 h-5 rounded-full bg-red-100 hover:bg-red-200 text-red-400 flex items-center justify-center"><i className="fas fa-times text-[8px]"></i></button>}
                                         </div>
                                     </div>);
                                 })}
@@ -1991,7 +2124,7 @@
                         </div>
 
                         <button onClick={saveSt} disabled={busy||!isEditSt} className="w-full py-2.5 rounded-xl text-white font-bold text-sm transition-all disabled:opacity-40 btn-primary"><i className="fas fa-save mr-2"></i>Simpan Semua Pengaturan</button>
-                    </div>)}
+                    </div>);})()}
 
                     <UserForm show={showUF} onClose={()=>{setShowUF(false);setEditU(null)}} editing={editU} onSave={saveUser} tenants={null} notify={notify} mode="tenant" fixedTenantId={tenant.id} />
                     <Confirm show={cfm.show} title={cfm.title} msg={cfm.msg} danger={cfm.danger} onOk={cfm.onOk} onNo={()=>setCfm({show:false})} />
@@ -2082,7 +2215,7 @@
                             {view==='dashboard'&&<DashboardView session={session} td={td} users={users} schedules={schedules} timesheets={timesheets} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} notify={notify} tenant={tenant} logAct={logAct} />}
                             {view==='schedule'&&<ScheduleView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} logAct={logAct} />}
                             {view==='timesheet'&&<TimesheetView schedules={schedules} timesheets={timesheets} users={users} session={session} tenant={tenant} td={td} tz={tz} theme={theme} hasPerm={hasPerm} notify={notify} sysSettings={sysSettings} logAct={logAct} />}
-                            {view==='analytics'&&<AnalyticsView schedules={schedules} timesheets={timesheets} users={users} session={session} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} />}
+                            {view==='analytics'&&<AnalyticsView schedules={schedules} timesheets={timesheets} users={users} session={session} tz={tz} theme={theme} hasPerm={hasPerm} sysSettings={sysSettings} td={td} />}
                             {view==='admin'&&canAdmin&&<TenantAdminView users={users} timesheets={timesheets} schedules={schedules} session={session} tenant={tenant} td={td} tz={tz} theme={theme} notify={notify} sysSettings={sysSettings} hasPerm={hasPerm} logAct={logAct} />}
                         </div>
                     </main>
