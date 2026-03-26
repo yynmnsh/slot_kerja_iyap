@@ -193,6 +193,19 @@
         .animate-gentle-pulse { animation: gentlePulse 2.5s ease-in-out infinite; }
         .animate-slide-in-left { animation: slideInLeft 0.3s ease-out both; }
 
+        /* Scrollbar polish */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.3); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.5); }
+
+        /* Smooth page transitions */
+        * { scroll-behavior: smooth; }
+        button, a { -webkit-tap-highlight-color: transparent; }
+
+        /* Selection color */
+        ::selection { background: color-mix(in srgb, var(--c-primary) 20%, transparent); }
+
         .toggle-track {
             width: 44px; height: 24px; border-radius: 12px; padding: 2px;
             background: #cbd5e1; transition: background 0.25s ease; cursor: pointer; position: relative;
@@ -508,9 +521,9 @@
         const Modal = ({ show, onClose, title, wide, children }) => {
             if (!show) return null;
             return (
-                <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-                    <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm animate-fade-in"></div>
-                    <div className={`relative glass-strong rounded-t-3xl sm:rounded-3xl shadow-2xl border border-white/50 animate-slide-up overflow-hidden w-full ${wide?'sm:max-w-2xl':'sm:max-w-md'}`} onClick={e=>e.stopPropagation()}>
+                <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4" style={{position:'fixed',top:0,left:0,right:0,bottom:0}} onClick={onClose}>
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-in"></div>
+                    <div className={`relative glass-strong rounded-t-3xl sm:rounded-3xl shadow-2xl border border-white/50 animate-slide-up overflow-hidden w-full z-10 ${wide?'sm:max-w-2xl':'sm:max-w-md'}`} onClick={e=>e.stopPropagation()}>
                         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100/80">
                             <h3 className="text-base font-bold text-slate-800">{title}</h3>
                             <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all active:scale-90"><i className="fas fa-times text-sm"></i></button>
@@ -527,9 +540,9 @@
         const Confirm = ({ show, title, msg, danger, onOk, onNo }) => {
             if (!show) return null;
             return (
-                <div className="fixed inset-0 z-[300] flex items-center justify-center p-6">
-                    <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-sm animate-fade-in" onClick={onNo}></div>
-                    <div className="relative glass-strong rounded-3xl shadow-2xl border border-white/50 animate-pop-in w-full max-w-xs p-6">
+                <div className="fixed inset-0 z-[300] flex items-center justify-center p-6" style={{position:'fixed',top:0,left:0,right:0,bottom:0}}>
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm animate-fade-in" onClick={onNo}></div>
+                    <div className="relative glass-strong rounded-3xl shadow-2xl border border-white/50 w-full max-w-xs p-6 z-10" style={{animation:'popIn 0.25s cubic-bezier(0.16,1,0.3,1) both'}}>
                         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4 ${danger?'bg-red-100':'bg-blue-100'}`}>
                             <i className={`fas ${danger?'fa-trash-alt text-red-500':'fa-question-circle text-blue-500'} text-lg`}></i>
                         </div>
@@ -1168,7 +1181,7 @@
                                     <div className="flex items-center gap-1 bg-white/10 rounded-xl p-1"><button onClick={()=>shiftMap(-1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-left"></i></button><button onClick={()=>setMapPt(todayPt)} className={`px-2.5 h-7 text-[10px] font-bold rounded-lg min-w-[60px] text-center ${mapPt===todayPt?'bg-white shadow-sm':'text-white hover:bg-white/20'}`} style={mapPt===todayPt?{color:theme.primary}:{}}>{mapPt===todayPt?'Hari Ini':formatDateShort(mapPt)}</button><button onClick={()=>shiftMap(1)} className="w-7 h-7 flex items-center justify-center text-white hover:bg-white/20 rounded-lg text-xs"><i className="fas fa-chevron-right"></i></button></div></div>
                                     <div className="mt-2 flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5"><i className="fas fa-clock text-white/40 text-[9px]"></i><span className="text-white/60 text-[9px]">Hari kerja = 00:00–23:59 PT.</span></div>
                                 </div>
-                                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-1"><div className="flex items-center justify-between"><span className="text-[9px] font-bold uppercase tracking-wide" style={{color:theme.primary}}>PT: {mapPt}</span><span className={`text-[10px] font-bold ${mdOver?'text-red-500':mdMins>0?'':'text-slate-400'}`} style={!mdOver&&mdMins>0?{color:theme.primary}:{}}>{mdSch.length} jadwal · {(mdMins/60).toFixed(1)}/{sysSettings?.dailyQuotaHours||10}j{mdOver?' (Melebihi!)':''}</span></div><div className="bg-slate-200 rounded-full h-1"><div className={`h-1 rounded-full transition-all ${mdOver?'bg-red-400':mdMins>0?'bg-blue-400':'bg-slate-300'}`} style={{width:`${mdPct}%`}}/></div></div>
+                                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-1"><div className="flex items-center justify-between"><span className="text-[9px] font-bold uppercase tracking-wide" style={{color:theme.primary}}>PT: {mapPt}{mapPt===todayPt?' (Hari Ini)':''} · {(()=>{const[y,mo,d]=mapPt.split('-').map(Number);return new Date(y,mo-1,d).toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long'});})()}</span><span className={`text-[10px] font-bold ${mdOver?'text-red-500':mdMins>0?'':'text-slate-400'}`} style={!mdOver&&mdMins>0?{color:theme.primary}:{}}>{mdSch.length} jadwal · {(mdMins/60).toFixed(1)}/{sysSettings?.dailyQuotaHours||10}j{mdOver?' (Melebihi!)':''}</span></div><div className="bg-slate-200 rounded-full h-1"><div className={`h-1 rounded-full transition-all ${mdOver?'bg-red-400':mdMins>0?'bg-blue-400':'bg-slate-300'}`} style={{width:`${mdPct}%`}}/></div></div>
                                 <div className="p-3"><div className="relative w-full h-20 bg-white border border-slate-200 rounded-lg overflow-visible shadow-sm">
                                     <div className="absolute top-0 left-0 right-0 h-4 border-b border-slate-100 flex justify-between bg-slate-50 rounded-t-lg">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full flex flex-col justify-center relative opacity-60 w-0"><span className={`text-[7px] text-slate-500 font-bold absolute ${h===0?'left-1':h===24?'right-1':'left-1/2 -translate-x-1/2'}`}>{String(h).padStart(2,'0')}:00</span></div>)}</div>
                                     <div className="absolute inset-y-4 left-0 right-0 flex justify-between pointer-events-none">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full border-l border-slate-200 border-dashed w-0"></div>)}</div>
@@ -1581,7 +1594,7 @@
                             </div>
                             <div className="px-3 py-1.5 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2">
                                 <i className="fas fa-clock text-blue-400 text-[9px]"></i>
-                                <span className="text-[9px] text-slate-500">Hari kerja dihitung berdasarkan <b>PT (Pacific Time)</b> — 00:00–23:59 PT.</span>
+                                <span className="text-[9px] text-slate-500"><b>PT: {tsPt}</b>{isToday?' (Hari Ini)':''} · {(()=>{const[y,mo,d]=tsPt.split('-').map(Number);return new Date(y,mo-1,d).toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long'});})()}</span>
                             </div>
                             <div className="flex divide-x divide-slate-100 bg-slate-50 border-b border-slate-100">
                                 <div className="flex-1 px-3 py-2 text-center"><p className="text-[8px] font-bold text-slate-400 uppercase">Rencana</p><p className="text-sm font-black text-slate-700">{planBlocks.length}</p></div>
@@ -1859,7 +1872,7 @@
             const delUser=(uid)=>{const u=getU(uid);setCfm({show:true,title:'Hapus Pengguna?',msg:`"${u.displayName}" akan dihapus.`,danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,'users',uid));logAct('user_delete',u.displayName,session.id);notify('Dihapus','success');}catch(e){notify('Gagal','error');}}});};
 
             // Payment
-            const pendSh=timesheets.filter(t=>t.status==='pending');const paidSh=timesheets.filter(t=>t.status==='paid');
+            const pendSh=timesheets.filter(t=>t.status==='pending'&&t.userId!=='__alloc__');const paidSh=timesheets.filter(t=>t.status==='paid');
             const totalPendAmt=pendSh.reduce((a,t)=>a+getAmt(t),0);const totalPendMins=pendSh.reduce((a,t)=>a+parseInt(t.duration||0),0);
             const pendByUser=useMemo(()=>{const m={};pendSh.forEach(ts=>{if(!m[ts.userId])m[ts.userId]={sheets:[],total:0,mins:0};m[ts.userId].sheets.push(ts);m[ts.userId].total+=getAmt(ts);m[ts.userId].mins+=parseInt(ts.duration||0);});return Object.entries(m).map(([uid,d])=>({uid,...d}));},[pendSh,sysSettings]);
 
