@@ -1048,40 +1048,51 @@
                 return ls;
             }, [schedules, showHistory, filterMine, sortOrder, session.id, canViewAll]);
 
-            // Timeline — handles cross-midnight blocks
+            // Timeline — position blocks by PT time (consistent with PT day boundary)
+            const ptOff = TZ_CONFIG.PT.offsetUTC;
+            const toPtTime = (timeStr, dateStr) => {
+                const ep = getEpochFromWIB(dateStr, timeStr);
+                const d = new Date(ep + ptOff * 3600000);
+                return { time: `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`, date: `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}` };
+            };
+            const prevPtDay = addDays(mapPt, -1);
+            const toMin = t => { const [h,m]=(t||'00:00').split(':').map(Number); return h*60+m; };
             const tlBlocks = useMemo(() => {
                 const bl = [];
-                schedules.forEach(s => {
-                    if (editId && s.id === editId) return;
-                    const ptDay = getPSTDay(s.startDate||s.date, s.startTime);
-                    const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz);
-                    const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz);
-                    const sM = parseInt(uS.time.split(':')[0])*60 + parseInt(uS.time.split(':')[1]);
-                    const eM = parseInt(uE.time.split(':')[0])*60 + parseInt(uE.time.split(':')[1]);
-                    const crossesMidnight = uS.date < uE.date;
-                    if (ptDay === mapPt) {
-                        // Block starts on this PT day
-                        if (crossesMidnight) {
-                            bl.push({...s, sp:sM/1440*100, wp:(1440-sM)/1440*100, uS, uE});
-                        } else if (eM > sM) {
-                            bl.push({...s, sp:sM/1440*100, wp:(eM-sM)/1440*100, uS, uE});
-                        }
-                    }
-                    // Check if this schedule spills INTO mapPt from previous day
-                    if (crossesMidnight && addDays(ptDay, 1) === mapPt) {
-                        bl.push({...s, sp:0, wp:eM/1440*100, uS:{...uS,time:'00:00'}, uE, _cont:true});
-                    }
+                const buildB = s => ({ ...s, uiS: toPtTime(s.startTime, s.startDate||s.date), uiE: toPtTime(s.endTime, s.endDate||s.date) });
+                // Main blocks: start on mapPt
+                const mainB = schedules.filter(s => !editId || s.id !== editId).filter(s => getPSTDay(s.startDate||s.date, s.startTime) === mapPt).map(buildB);
+                // Overflow blocks: started previous day, end extends into mapPt
+                const overB = schedules.filter(s => !editId || s.id !== editId).filter(s => getPSTDay(s.startDate||s.date, s.startTime) === prevPtDay).map(buildB).filter(b => b.uiE.date > b.uiS.date).map(b => ({...b, isOverflow: true}));
+                [...mainB, ...overB].forEach(b => {
+                    let sM, eM;
+                    if (b.isOverflow) { sM = 0; eM = toMin(b.uiE.time); if (eM <= 0) return; }
+                    else { sM = toMin(b.uiS.time); eM = toMin(b.uiE.time); if (eM < sM) eM = 1440; if (eM <= sM) return; }
+                    // Real duration from epoch
+                    const sEp = getEpochFromWIB(b.startDate||b.date, b.startTime);
+                    let eEp = getEpochFromWIB(b.endDate||b.date, b.endTime);
+                    if (!b.endDate && eEp <= sEp) eEp += 86400000;
+                    const realDm = Math.round((eEp - sEp) / 60000);
+                    // WIB times for tooltip
+                    const wibS = toDisplayTime(b.startTime, b.startDate||b.date, 'WIB');
+                    const wibE = toDisplayTime(b.endTime, b.endDate||b.date, 'WIB');
+                    const crossN = !b.isOverflow && eM === 1440 && toMin(b.uiE.time) < toMin(b.uiS.time);
+                    bl.push({ ...b, sp: sM/1440*100, wp: Math.max(0.5, (eM-sM)/1440*100), realDm, wibS, wibE, crossNext: crossN });
                 });
                 return bl;
-            }, [schedules, mapPt, editId, tz]);
+            }, [schedules, mapPt, editId]);
 
             const prevBlock = useMemo(() => {
                 if (!form.startDate || !form.startTime || !form.endTime) return null;
-                const sM = parseInt(form.startTime.split(':')[0])*60 + parseInt(form.startTime.split(':')[1]);
-                let eM = parseInt(form.endTime.split(':')[0])*60 + parseInt(form.endTime.split(':')[1]);
-                if (form.endDate > form.startDate) eM = 1440; else if (eM < sM && !form.endDate) eM = 1440;
+                // Convert form time (in tz) to WIB first, then to PT
+                const dbS = toDbTime(form.startTime, form.startDate, tz);
+                const dbE = toDbTime(form.endTime, form.endDate || form.startDate, tz);
+                const ptS = toPtTime(dbS.time, dbS.date);
+                const ptE = toPtTime(dbE.time, dbE.date);
+                const sM = toMin(ptS.time); let eM = toMin(ptE.time);
+                if (ptE.date > ptS.date) eM = 1440; else if (eM < sM) eM = 1440;
                 if (eM <= sM) return null; return { sp: sM/1440*100, wp: (eM-sM)/1440*100 };
-            }, [form]);
+            }, [form, tz]);
 
             const startEdit = (s) => { const uS = toDisplayTime(s.startTime, s.startDate||s.date, tz); const uE = toDisplayTime(s.endTime, s.endDate||s.date, tz); setForm({ startDate:uS.date, startTime:uS.time, endDate:uE.date, endTime:uE.time }); setEditId(s.id); window.scrollTo({top:0,behavior:'smooth'}); };
             const resetForm = () => { setForm({ startDate:'', startTime:'14:00', endDate:'', endTime:'15:00' }); setEditId(null); };
@@ -1162,9 +1173,9 @@
                                     <div className="absolute top-0 left-0 right-0 h-4 border-b border-slate-100 flex justify-between bg-slate-50 rounded-t-lg">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full flex flex-col justify-center relative opacity-60 w-0"><span className={`text-[7px] text-slate-500 font-bold absolute ${h===0?'left-1':h===24?'right-1':'left-1/2 -translate-x-1/2'}`}>{String(h).padStart(2,'0')}:00</span></div>)}</div>
                                     <div className="absolute inset-y-4 left-0 right-0 flex justify-between pointer-events-none">{[0,4,8,12,16,20,24].map(h=><div key={h} className="h-full border-l border-slate-200 border-dashed w-0"></div>)}</div>
                                     <div className="absolute top-4 bottom-0 left-0 right-0 z-10">
-                                        {tlBlocks.map((b,i)=>{const u=getU(b.userId);const dm=Math.round(b.wp/100*1440);return(<div key={b.id||i} className="absolute h-full top-0 group cursor-pointer border-l-2 hover:z-30 hover:-translate-y-1 transition-all" style={{left:`${b.sp}%`,width:`${b.wp}%`,borderColor:u.color,backgroundColor:`${u.color}15`}}><div className="w-full h-1" style={{backgroundColor:u.color}}></div><div className={`hidden group-hover:flex absolute ${b.sp>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-800 text-white text-[10px] p-2 rounded-lg shadow-xl whitespace-nowrap flex-col gap-1 z-50 border border-slate-700`}><div className="flex items-center gap-1.5 border-b border-slate-600 pb-1"><div className="w-2 h-2 rounded-full" style={{backgroundColor:u.color}}></div><span className="font-bold">{u.displayName}</span></div><span className="text-slate-300 font-mono">{b.uS.time}–{b.uE.time} · {fmtDuration(dm)}</span></div></div>);})}
+                                        {tlBlocks.map((b,i)=>{const u=getU(b.userId);const isPlan=!b.isOverflow;return(<div key={b.id||i} className={`absolute group cursor-pointer hover:z-30 ${b.isOverflow?'opacity-60':''}`} style={{left:`${b.sp}%`,width:`${b.wp}%`,top:'0',height:'100%'}}><div className="w-full h-full relative"><div className={`absolute inset-0 rounded-sm border-2`} style={{borderColor:u.color,backgroundColor:`${u.color}18`,borderStyle:b.isOverflow?'dashed':'solid'}}></div><div className="absolute top-0 left-0 right-0 h-1 rounded-t-sm" style={{backgroundColor:u.color}}></div></div><div className={`hidden group-hover:flex absolute ${b.sp>50?'right-0':'left-0'} bottom-full mb-1 bg-slate-900/95 backdrop-blur text-white text-[9px] p-2 rounded-xl shadow-2xl whitespace-nowrap flex-col gap-0.5 z-50 border border-white/10`}><div className="flex items-center gap-1.5 pb-1 border-b border-white/10"><div className="w-2 h-2 rounded-full" style={{backgroundColor:u.color}}></div><span className="font-bold text-[10px]">{u.displayName}</span>{b.isOverflow&&<span className="text-indigo-300 text-[8px]">(lanjutan)</span>}</div><span className="text-slate-300 font-mono"><b className="text-amber-400 mr-1">PT</b>{b.uiS.time}–{b.uiE.time}</span><span className="text-slate-300 font-mono"><b className="text-cyan-400 mr-1">WIB</b>{b.wibS.time}–{b.wibE.time}</span><span className="text-slate-400 text-[8px] pt-0.5 border-t border-white/10 mt-0.5">{fmtDuration(b.realDm)}{b.crossNext?' → berlanjut':''}{b.isOverflow?' ← dari kemarin':''}</span></div></div>);})}
                                         {prevBlock&&<div className="absolute h-full top-0 border-x-2 border-dashed z-20 pointer-events-none flex items-center justify-center" style={{left:`${prevBlock.sp}%`,width:`${prevBlock.wp}%`,borderColor:theme.primary,backgroundColor:`${theme.primary}08`}}><div className="text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm" style={{backgroundColor:theme.primary,opacity:0.8}}>Baru</div></div>}
-                                        {getPSTDayFromEpoch(Date.now())===mapPt&&(()=>{const etzs=td?.enabledTimezones||['WIB'];const noL=new Date(Date.now()+TZ_CONFIG[tz].offsetUTC*3600000);const nm=noL.getUTCHours()*60+noL.getUTCMinutes();const pct=nm/1440*100;const getTzT=(k)=>{const d=new Date(Date.now()+TZ_CONFIG[k].offsetUTC*3600000);return`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;};return(<><div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{left:`${pct}%`}}><div className="absolute top-0 bottom-0 w-0.5 bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div><div className="absolute -top-0.5 w-2.5 h-2.5 bg-red-500 rounded-full shadow" style={{left:'50%',transform:'translateX(-50%)'}}></div></div><div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{left:`${pct}%`,width:'12px',transform:'translateX(-6px)'}}><div className={`hidden group-hover:flex absolute ${pct>75?'right-0':'left-0'} top-0 bg-slate-900/95 backdrop-blur-sm text-white rounded-xl shadow-xl whitespace-nowrap flex-col overflow-hidden border border-white/10`}>{etzs.map((k,i)=>(<div key={k} className={`flex items-center gap-1.5 px-2.5 py-1.5 ${i>0?'border-t border-white/10':''}`}><i className={`fas fa-circle text-[5px] ${k===tz?'text-red-400':'text-cyan-400'}`}></i><span className={`text-[8px] font-semibold ${k===tz?'text-red-300':'text-cyan-300'}`}>{TZ_CONFIG[k]?.short}</span><span className={`text-[9px] font-mono ${k===tz?'text-white font-bold':'text-slate-300'}`}>{getTzT(k)}</span>{k===tz&&<span className="text-slate-400 text-[8px]">Sekarang</span>}</div>))}</div></div></>);})()}
+                                        {getPSTDayFromEpoch(Date.now())===mapPt&&(()=>{const etzs=td?.enabledTimezones||['WIB'];const noL=new Date(Date.now()+ptOff*3600000);const nm=noL.getUTCHours()*60+noL.getUTCMinutes();const pct=nm/1440*100;const getTzT=(k)=>{const d=new Date(Date.now()+TZ_CONFIG[k].offsetUTC*3600000);return`${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;};return(<><div className="absolute top-0 bottom-0 z-20 pointer-events-none" style={{left:`${pct}%`}}><div className="absolute top-0 bottom-0 w-0.5 bg-red-500" style={{animation:'pulseSoft 2s ease-in-out infinite'}}></div><div className="absolute -top-0.5 w-2.5 h-2.5 bg-red-500 rounded-full shadow" style={{left:'50%',transform:'translateX(-50%)'}}></div></div><div className="absolute top-0 bottom-0 z-30 group cursor-default" style={{left:`${pct}%`,width:'12px',transform:'translateX(-6px)'}}><div className={`hidden group-hover:flex absolute ${pct>75?'right-0':'left-0'} top-0 bg-slate-900/95 backdrop-blur-sm text-white rounded-xl shadow-xl whitespace-nowrap flex-col overflow-hidden border border-white/10`}>{etzs.map((k,i)=>(<div key={k} className={`flex items-center gap-1.5 px-2.5 py-1.5 ${i>0?'border-t border-white/10':''}`}><i className={`fas fa-circle text-[5px] ${k==='PT'?'text-red-400':'text-cyan-400'}`}></i><span className={`text-[8px] font-semibold ${k==='PT'?'text-red-300':'text-cyan-300'}`}>{TZ_CONFIG[k]?.short}</span><span className={`text-[9px] font-mono ${k==='PT'?'text-white font-bold':'text-slate-300'}`}>{getTzT(k)}</span>{k==='PT'&&<span className="text-slate-400 text-[8px]">Sekarang</span>}</div>))}</div></div></>);})()}
                                     </div>
                                 </div></div>
                             </div>
@@ -1834,10 +1845,10 @@
             const [editU, setEditU] = useState(null);
 
             const isAdm = session.role==='admin' || session.role==='superadmin';
-            const getU = (uid) => users.find(u=>u.id===uid) || {displayName:'?',color:'#94a3b8'};
+            const getU = (uid) => uid==='__alloc__'?{displayName:'Alokasi Kurs',color:'#8b5cf6',isAlloc:true}:users.find(u=>u.id===uid)||{displayName:'?',color:'#94a3b8'};
             const xRate = (sysSettings?.usdToIdr||16000);
             const fmtC = (n) => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
-            const getAmt = (ts) => (parseFloat(ts.paymentUSD)||0) * xRate;
+            const getAmt = (ts) => ts.type==='fee_allocation' ? (parseFloat(ts.paymentIDR)||0) : (parseFloat(ts.paymentUSD)||0) * xRate;
 
             useEffect(()=>{if(!isEditSt&&sysSettings._loaded)setSF({dailyQuotaHours:sysSettings.dailyQuotaHours||10,baseHourlyRateUSD:sysSettings.baseHourlyRateUSD||15,usdToIdr:sysSettings.usdToIdr||16000,actualKurs:sysSettings.actualKurs||sysSettings.usdToIdr||16000,feeAllocations:sysSettings.feeAllocations||[],userRates:sysSettings.userRates||{}});},[sysSettings]);
             useEffect(()=>{if(!tenant?.id)return;const unsub=window.fs.onSnapshot(window.fs.collection(window.db,`tenants/${tenant.id}/activityLog`),snap=>{const e=snap.docs.map(d=>({id:d.id,...d.data()}));e.sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));setActLog(e.slice(0,100));});return()=>unsub();},[tenant?.id]);
@@ -1854,10 +1865,32 @@
 
             const allSelSheets=pendSh.filter(s=>{const sel=selectedSheets[s.userId];return sel&&sel.has(s.id);});
             const selTotal=allSelSheets.reduce((a,s)=>a+getAmt(s),0);const selMins=allSelSheets.reduce((a,s)=>a+parseInt(s.duration||0),0);const hasSel=allSelSheets.length>0;
+
+            // Compute checked allocation amounts
+            const allocInfo = useMemo(() => {
+                const allocs = sysSettings?.feeAllocations || [];
+                const baseK = sysSettings?.usdToIdr || 16000;
+                const actK = sysSettings?.actualKurs || baseK;
+                const surplus = actK - baseK;
+                const baseRate2 = sysSettings?.baseHourlyRateUSD || 15;
+                const surplusPerHr = surplus * baseRate2;
+                if (surplus <= 0 || allocs.length === 0) return { total: 0, items: [] };
+                const selHrs = selMins / 60;
+                const items = [...selAllocs].filter(i => allocs[i]).map(i => {
+                    const al = allocs[i];
+                    const perHr = al.type === 'percent' ? surplusPerHr * (al.value || 0) / 100 : (al.value || 0);
+                    return { name: al.name || 'Kantong ' + (i + 1), amount: Math.round(perHr * selHrs), perHr, idx: i };
+                });
+                return { total: items.reduce((a, x) => a + x.amount, 0), items, surplusPerHr, allocs };
+            }, [sysSettings, selAllocs, selMins]);
+
+            const grandSelTotal = selTotal + allocInfo.total;
             const toggleSheet=(uid,sid)=>setSelSh(p=>{const s=new Set(p[uid]||[]);s.has(sid)?s.delete(sid):s.add(sid);return{...p,[uid]:s};});
             const toggleAllUser=(uid,sheets)=>setSelSh(p=>{const s=p[uid]||new Set();const all=sheets.every(x=>s.has(x.id));return{...p,[uid]:all?new Set():new Set(sheets.map(x=>x.id))};});
 
-            const markPaid=(ids)=>{setCfm({show:true,title:'Tandai Dibayar?',msg:`${ids.length} laporan akan ditandai dibayar.`,onOk:async()=>{setCfm({show:false});setBusy(true);try{const b=window.fs.writeBatch(window.db);ids.forEach(id=>b.update(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id),{status:'paid',paidAt:new Date().toISOString()}));await b.commit();logAct('payment_marked_paid',`${ids.length} laporan`,session.id);notify(`${ids.length} ditandai dibayar`,'success');setSelSh({});}catch(e){notify('Gagal','error');}setBusy(false);}});};
+            const markPaid=(ids)=>{const allocItems=allocInfo.items;const allocTotal=allocInfo.total;setCfm({show:true,title:'Tandai Dibayar?',msg:`${ids.length} laporan${allocItems.length>0?' + '+allocItems.length+' alokasi kurs':''} akan ditandai dibayar.`,onOk:async()=>{setCfm({show:false});setBusy(true);try{const now=new Date().toISOString();const b=window.fs.writeBatch(window.db);ids.forEach(id=>b.update(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id),{status:'paid',paidAt:now}));// Save allocation docs
+                allocItems.forEach(al=>{const ref=window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,gid());b.set(ref,{type:'fee_allocation',allocName:al.name,paymentIDR:al.amount,paymentUSD:'0',status:'paid',paidAt:now,duration:Math.round(selMins),date:getToday(),startTime:'00:00',userId:'__alloc__',createdAt:now});});
+                await b.commit();logAct('payment_marked_paid',`${ids.length} laporan${allocItems.length>0?' + '+allocItems.length+' alokasi':''}`,session.id);notify(`${ids.length} laporan ditandai dibayar`,'success');setSelSh({});setSelAllocs(new Set());}catch(e){notify('Gagal: '+e.message,'error');}setBusy(false);}});};
             const markUnpaid=(id)=>{const ts=timesheets.find(t=>t.id===id);const u=ts?getU(ts.userId).displayName:'';setCfm({show:true,title:'Kembalikan ke Pending?',msg:`Laporan ${u} akan dikembalikan ke status pending.`,onOk:async()=>{setCfm({show:false});setBusy(true);try{await window.fs.updateDoc(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id),{status:'pending',paidAt:null});logAct('payment_reverted',u,session.id);notify('Dikembalikan ke pending','success');}catch(e){notify('Gagal','error');}setBusy(false);}});};
             const deleteTs=(id)=>{const ts=timesheets.find(t=>t.id===id);const u=ts?getU(ts.userId).displayName:'';setCfm({show:true,title:'Hapus Laporan?',msg:`Laporan ${u} akan dihapus permanen.`,danger:true,onOk:async()=>{setCfm({show:false});try{await window.fs.deleteDoc(window.fs.doc(window.db,`tenants/${tenant.id}/timesheets`,id));logAct('timesheet_delete',u,session.id);notify('Laporan dihapus','success');}catch(e){notify('Gagal','error');}}});};
 
@@ -1880,8 +1913,8 @@
                     {/* PENDING */}
                     {tab==='pending'&&(<div className="space-y-3">
                         <div className="rounded-2xl overflow-hidden shadow-xl" style={{background:'linear-gradient(135deg, #1e293b, #0f172a)'}}>
-                            <div className="grid grid-cols-2 divide-x divide-white/10"><div className="p-4"><p className="text-[10px] font-bold text-green-300 uppercase mb-1"><i className="fas fa-check-circle mr-1"></i>Siap Dibayar</p><p className={`text-xl font-black ${hasSel?'text-green-300':'text-slate-500'}`}>{fmtC(selTotal)}</p><p className="text-[10px] text-slate-400 mt-0.5">{allSelSheets.length} laporan · {fmtDuration(selMins)}</p></div><div className="p-4"><p className="text-[10px] font-bold text-slate-400 uppercase mb-1"><i className="fas fa-clock mr-1"></i>Masih Pending</p><p className="text-xl font-black text-slate-300">{fmtC(totalPendAmt-selTotal)}</p><p className="text-[10px] text-slate-500 mt-0.5">{pendSh.length-allSelSheets.length} laporan</p></div></div>
-                            {hasSel&&<div className="px-4 pb-4 pt-3 border-t border-white/10"><button onClick={()=>markPaid(allSelSheets.map(s=>s.id))} disabled={busy} className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50">{busy?<i className="fas fa-spinner fa-spin"></i>:<i className="fas fa-check-circle"></i>}Tandai Dibayar <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px]">{allSelSheets.length} · {fmtC(selTotal)}</span></button></div>}
+                            <div className="grid grid-cols-2 divide-x divide-white/10"><div className="p-4"><p className="text-[10px] font-bold text-green-300 uppercase mb-1"><i className="fas fa-check-circle mr-1"></i>Siap Dibayar</p><p className={`text-xl font-black ${hasSel?'text-green-300':'text-slate-500'}`}>{fmtC(grandSelTotal)}</p><p className="text-[10px] text-slate-400 mt-0.5">{allSelSheets.length} laporan{allocInfo.items.length>0?' + '+allocInfo.items.length+' alokasi':''}</p>{allocInfo.total>0&&<p className="text-[9px] text-violet-300 mt-0.5">Alokasi: {fmtC(allocInfo.total)}</p>}</div><div className="p-4"><p className="text-[10px] font-bold text-slate-400 uppercase mb-1"><i className="fas fa-clock mr-1"></i>Masih Pending</p><p className="text-xl font-black text-slate-300">{fmtC(totalPendAmt-selTotal)}</p><p className="text-[10px] text-slate-500 mt-0.5">{pendSh.length-allSelSheets.length} laporan</p></div></div>
+                            {hasSel&&<div className="px-4 pb-4 pt-3 border-t border-white/10"><button onClick={()=>markPaid(allSelSheets.map(s=>s.id))} disabled={busy} className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50">{busy?<i className="fas fa-spinner fa-spin"></i>:<i className="fas fa-check-circle"></i>}Tandai Dibayar <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[11px]">{fmtC(grandSelTotal)}</span></button></div>}
                             {!hasSel&&pendSh.length>0&&<div className="px-4 pb-3 pt-1"><p className="text-center text-[11px] text-slate-500 italic"><i className="fas fa-hand-point-down mr-1"></i>Pilih laporan di bawah</p></div>}
                         </div>
                         {/* Fee allocation from surplus kurs */}
